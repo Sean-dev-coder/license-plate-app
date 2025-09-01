@@ -25,6 +25,9 @@ onMounted(() => {
   })
 })
 
+// --- 共用變數 ---
+const dbName = 'licensePlates'
+
 // --- 核心功能函式 ---
 const handleSearch = async () => {
   if (!searchPlate.value) {
@@ -42,7 +45,7 @@ const handleSearch = async () => {
     
     // --- 這是修改後的核心查詢邏輯 ---
     // 我們現在查詢 searchKeywords 陣列中是否包含使用者輸入的詞
-    const querySnapshot = await db.collection('licensePlates')
+    const querySnapshot = await db.collection(dbName)
                                   .where('searchKeywords', 'array-contains', searchTerm)
                                   .get()
 
@@ -71,7 +74,7 @@ const handleUpdate = async () => {
   if (!originalPlateId.value) return
   isLoading.value = true
   try {
-    const docRef = db.collection('licensePlates').doc(originalPlateId.value)
+    const docRef = db.collection(dbName).doc(originalPlateId.value)
     const dataToUpdate = {
       householdCode: resultData.value.householdCode,
       notes: resultData.value.notes,
@@ -94,7 +97,7 @@ const handleCreate = async () => {
   if (!originalPlateId.value) return
   isLoading.value = true
   try {
-    const docRef = db.collection('licensePlates').doc(originalPlateId.value)
+    const docRef = db.collection(dbName).doc(originalPlateId.value)
     const keywords = originalPlateId.value.split('-').filter(Boolean)
     const dataToCreate = {
       householdCode: resultData.value.householdCode,
@@ -132,7 +135,7 @@ const handleDelete = async () => {
       console.log('圖片已從 Storage 刪除')
     }
     // 再從 Firestore 刪除文件
-    await db.collection('licensePlates').doc(originalPlateId.value).delete()
+    await db.collection(dbName).doc(originalPlateId.value).delete()
     
     message.value = '資料已成功刪除。'
     isSuccess.value = true
@@ -180,7 +183,7 @@ const handleImageUpload = async () => {
     const downloadURL = await uploadTask.ref.getDownloadURL()
     
     // 4. 將 URL 更新回 Firestore
-    const docRef = db.collection('licensePlates').doc(originalPlateId.value)
+    const docRef = db.collection(dbName).doc(originalPlateId.value)
     await docRef.update({ imageUrl: downloadURL })
     
     // 5. 更新畫面上的資料，讓圖片立刻顯示
