@@ -2,7 +2,14 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { auth, db, storage } from '../firebase.js'
 
-// --- 狀態變數 (維持不變) ---
+// 1. 接收從父元件傳來的 prop
+const props = defineProps({
+  collection: {
+    type: String,
+    required: true
+  }
+})
+
 const searchPlate = ref('')
 const isLoading = ref(false)
 const message = ref('')
@@ -12,20 +19,18 @@ const searchResults = ref([])
 const selectedItem = ref(null)
 const showCreateForm = ref(false)
 const plateToCreate = ref('')
+const selectedFile = ref(null)
+const isUploading = ref(false)
 
-// --- 生命週期鉤子 (維持不變) ---
 onMounted(() => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
-// --- 核心功能函式 ---
-
-// vvv 這是我們唯一需要修改的函式 vvv
 const handleSearch = async () => {
-  if (!searchPlate.value) {
-    alert('請輸入查詢關鍵字！')
-    return
-  }
+  if (!searchPlate.value) { alert('請輸入查詢關鍵字！'); return }
+
+  const searchInputString = searchPlate.value.toUpperCase().trim()
+  searchPlate.value = ''
 
   isLoading.value = true
   searchResults.value = []
@@ -34,90 +39,107 @@ const handleSearch = async () => {
   showCreateForm.value = false
 
   try {
-    const searchInputString = searchPlate.value.toUpperCase().trim()
-
-    // +++ 新增的程式碼：立刻清空輸入框 +++
-    searchPlate.value = ''
-    
-    // 智慧判斷：如果輸入包含 '-', 則執行精準查詢
     if (searchInputString.includes('-')) {
-      const docRef = db.collection('licensePlates').doc(searchInputString)
+      const docRef = db.collection(props.collection).doc(searchInputString)
       const docSnap = await docRef.get()
-
       if (docSnap.exists) {
-        // 精準查詢有結果，直接放入列表並選中
-        const result = { id: docSnap.id, ...docSnap.data() }
+        const result = { id: docSnap.id, ...docSnap.data() }; 
         searchResults.value = [result]
         selectItem(result)
       } else {
-        // 精準查詢無結果，顯示新增表單
-        message.value = `查無車牌「${searchInputString}」，您可以新增此筆資料。`
-        isSuccess.value = false
-        showCreateForm.value = true
-        plateToCreate.value = searchInputString
-        selectedItem.value = { householdCode: '', notes: '' }
+        message.value = `查無車牌「${searchInputString}」，您可以新增此筆資料。`; isSuccess.value = false; showCreateForm.value = true; plateToCreate.value = searchInputString; selectedItem.value = { householdCode: '', notes: '' }
       }
     } else {
-      // 不含 '-', 執行多關鍵字查詢
       const searchTerms = searchInputString.split(' ').filter(term => term.length > 0)
-      if (searchTerms.length === 0) return
-      if (searchTerms.length > 10) {
-        alert('批次查詢一次最多只能輸入 10 個關鍵字。')
-        isLoading.value = false
-        return
-      }
-
-      const querySnapshot = await db.collection('licensePlates')
-                                    .where('searchKeywords', 'array-contains-any', searchTerms)
-                                    .get()
-
+      if (searchTerms.length === 0) { isLoading.value = false; return }
+      if (searchTerms.length > 10) { alert('批次查詢最多10個關鍵字。'); isLoading.value = false; return }
+      const querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
       if (!querySnapshot.empty) {
         searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
       } else {
-        message.value = `查無任何包含關鍵字「${searchTerms.join(', ')}」的資料。`
-        isSuccess.value = false
+        message.value = `查無任何包含關鍵字「${searchTerms.join(', ')}」的資料。`; isSuccess.value = false
       }
     }
-  } catch (error) {
-    console.error("查詢失敗:", error)
-    message.value = '查詢時發生錯誤，請稍後再試。'
-    isSuccess.value = false
-  } finally {
-    isLoading.value = false
-    // +++ 新增的程式碼：將焦點重新設定回輸入框 +++
-    nextTick(() => {
-      if (searchInput.value) {
-        searchInput.value.focus()
-      }
-    })
-  }
+  } catch (error) { console.error("查詢失敗:", error); message.value = '查詢時發生錯誤'; isSuccess.value = false }
+  finally { isLoading.value = false; nextTick(() => { if (searchInput.value) searchInput.value.focus() }) }
 }
 
 const selectItem = (item) => {
-  selectedItem.value = { ...item }
-  showCreateForm.value = false
-  message.value = ''
+  selectedItem.value = { ...item }; selectedFile.value = null; showCreateForm.value = false; message.value = ''
 }
 
-// ... handleUpdate, handleCreate, handleDelete 等其他函式維持不變 ...
 const handleUpdate = async () => {
   if (!selectedItem.value || !selectedItem.value.id) return
-  // ... (此處程式碼不變)
+  isLoading.value = true
+  try {
+    const docRef = db.collection(props.collection).doc(selectedItem.value.id)
+    const dataToUpdate = { householdCode: selectedItem.value.householdCode, notes: selectedItem.value.notes, lastUpdatedBy: auth.currentUser.email, updatedAt: new Date() }
+    await docRef.update(dataToUpdate)
+    message.value = '資料更新成功！'; isSuccess.value = true
+    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
+    if (index !== -1) { searchResults.value[index] = { ...searchResults.value[index], ...dataToUpdate } }
+  } catch (error) { console.error("更新失敗:", error); message.value = '更新失敗'; isSuccess.value = false }
+  finally { isLoading.value = false }
 }
+
 const handleCreate = async () => {
    if (!plateToCreate.value) return
-  // ... (此處程式碼不變)
+  isLoading.value = true
+  try {
+    const docRef = db.collection(props.collection).doc(plateToCreate.value)
+    const keywords = plateToCreate.value.toUpperCase().split('-').filter(Boolean)
+    const dataToCreate = { householdCode: selectedItem.value.householdCode, notes: selectedItem.value.notes, createdBy: auth.currentUser.email, createdAt: new Date(), searchKeywords: keywords, imageUrl: '' }
+    await docRef.set(dataToCreate)
+    message.value = `車牌「${plateToCreate.value}」已成功新增！`; isSuccess.value = true
+    showCreateForm.value = false; selectedItem.value = null; searchPlate.value = plateToCreate.value
+  } catch (error) { console.error("新增失敗:", error); message.value = '新增失敗'; isSuccess.value = false }
+  finally { isLoading.value = false }
 }
+
 const handleDelete = async () => {
   if (!selectedItem.value || !selectedItem.value.id) return
-  // ... (此處程式碼不變)
+  if (!window.confirm(`確定要永久刪除車牌「${selectedItem.value.id}」的資料嗎？`)) { return }
+  isLoading.value = true
+  try {
+    if (selectedItem.value.imageUrl) {
+      const imageRef = storage.refFromURL(selectedItem.value.imageUrl); await imageRef.delete()
+    }
+    await db.collection(props.collection).doc(selectedItem.value.id).delete()
+    message.value = '資料已成功刪除。'; isSuccess.value = true
+    searchResults.value = searchResults.value.filter(item => item.id !== selectedItem.value.id)
+    selectedItem.value = null
+  } catch (error) { console.error("刪除失敗:", error); message.value = '刪除失敗'; isSuccess.value = false }
+  finally { isLoading.value = false }
+}
+
+const handleFileSelect = (event) => {
+  selectedFile.value = event.target.files[0]
+}
+
+const handleImageUpload = async () => {
+  if (!selectedFile.value) { alert('請先選擇圖片檔案！'); return }
+  if (!selectedItem.value || !selectedItem.value.id) { alert('請先選擇資料項目'); return }
+  isUploading.value = true; message.value = '圖片上傳中...'; isSuccess.value = false
+  try {
+    const imagePath = `plates/${props.collection}/${selectedItem.value.id}`
+    const imageRef = storage.ref().child(imagePath)
+    const uploadTask = await imageRef.put(selectedFile.value)
+    const downloadURL = await uploadTask.ref.getDownloadURL()
+    const docRef = db.collection(props.collection).doc(selectedItem.value.id)
+    await docRef.update({ imageUrl: downloadURL })
+    selectedItem.value.imageUrl = downloadURL
+    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
+    if (index !== -1) { searchResults.value[index].imageUrl = downloadURL }
+    message.value = '圖片上傳成功！'; isSuccess.value = true; selectedFile.value = null
+  } catch (error) { console.error("圖片上傳失敗:", error); message.value = '圖片上傳失敗'; isSuccess.value = false }
+  finally { isUploading.value = false }
 }
 </script>
 
 <template>
   <div class="dashboard">
     <div class="search-section">
-      <input ref="searchInput" v-model="searchPlate" @keyup.enter="handleSearch" placeholder="請輸入車牌號碼查詢或新增" />
+      <input ref="searchInput" inputmode="numeric" v-model="searchPlate" @keyup.enter="handleSearch" placeholder="請輸入車牌號碼查詢或新增" />
       <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
     </div>
 
@@ -133,15 +155,8 @@ const handleDelete = async () => {
 
     <div v-if="selectedItem && !showCreateForm" class="result-section">
       <h3>編輯資料：{{ selectedItem.id }}</h3>
-      <div class="form-group">
-        <label>戶別代碼:</label>
-        <input v-model="selectedItem.householdCode" />
-      </div>
-      <div class="form-group">
-        <label>備註:</label>
-        <textarea v-model="selectedItem.notes" rows="3"></textarea>
-      </div>
-      
+      <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" /></div>
+      <div class="form-group"><label>備註:</label><textarea v-model="selectedItem.notes" rows="3"></textarea></div>
       <div class="form-group">
         <label>相關圖片:</label>
         <div class="image-preview">
@@ -150,12 +165,9 @@ const handleDelete = async () => {
         </div>
         <div class="image-upload">
           <input type="file" @change="handleFileSelect" accept="image/*" />
-          <button @click="handleImageUpload" :disabled="isUploading || !selectedFile">
-            {{ isUploading ? '上傳中...' : '上傳圖片' }}
-          </button>
+          <button @click="handleImageUpload" :disabled="isUploading || !selectedFile">{{ isUploading ? '上傳中...' : '上傳圖片' }}</button>
         </div>
       </div>
-      
       <div class="actions">
         <button @click="handleUpdate" :disabled="isLoading" class="save-button">儲存更新</button>
         <button @click="handleDelete" :disabled="isLoading" class="delete-button">刪除資料</button>
@@ -176,28 +188,24 @@ const handleDelete = async () => {
 </template>
 
 <style scoped>
-/* ... (原有樣式不變) ... */
-.results-list li.active { background-color: #007bff; color: white; border-color: #007bff;}
+.dashboard { margin-top: 20px; }
+.search-section { display: flex; gap: 10px; }
+.search-section input { flex-grow: 1; }
+.result-section { margin-top: 20px; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
+.form-group { margin-bottom: 15px; }
+.form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
+.actions { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; }
+.save-button { background-color: #28a745; }
+.delete-button { background-color: #dc3545; }
+.message-section { margin-top: 20px; text-align: center; color: #888; }
+.message-section.success p { color: #28a745; font-weight: bold; }
+.results-list ul { list-style: none; padding: 0; margin: 0; }
+.results-list li { padding: 10px 15px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 5px; cursor: pointer; transition: background-color 0.2s; }
+.results-list li:hover { background-color: #f5f5f5; }
+.results-list li.active { background-color: #007bff; color: white; border-color: #007bff; }
+.image-preview { margin-top: 10px; width: 100%; max-width: 300px; }
+.image-preview img { width: 100%; height: auto; border-radius: 5px; border: 1px solid #eee; }
+.image-upload { margin-top: 10px; }
+.image-upload button { margin-left: 10px; }
 @media (max-width: 480px) { .search-section { flex-direction: column; align-items: stretch; } }
-ul { list-style: none; padding: 0; }
-li { padding: 10px; border: 1px solid #ddd; margin-bottom: 5px; cursor: pointer; border-radius: 5px;}
-
-/* +++ 新增的圖片樣式 +++ */
-.image-preview {
-  margin-top: 10px;
-  width: 100%;
-  max-width: 300px;
-}
-.image-preview img {
-  width: 100%;
-  height: auto;
-  border-radius: 5px;
-  border: 1px solid #eee;
-}
-.image-upload {
-  margin-top: 10px;
-}
-.image-upload button {
-  margin-left: 10px;
-}
 </style>
