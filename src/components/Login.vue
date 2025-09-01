@@ -6,20 +6,17 @@ const email = ref('')
 const password = ref('')
 const errorMessage = ref('')
 
-const login = async () => {
-  try {
-    // v8 語法：auth 是一個物件，直接呼叫它的方法
-    await auth.signInWithEmailAndPassword(email.value, password.value)
-    errorMessage.value = ''
-  } catch (error) {
-    console.log(error)
-    errorMessage.value = '帳號或密碼錯誤。'
-  }
+// 在元件建立時，立刻嘗試從 localStorage 讀取儲存的 email
+const savedEmail = localStorage.getItem('lastLoginEmail')
+if (savedEmail) {
+  email.value = savedEmail
 }
 
 const handleLogin = async () => {
   try {
     await auth.signInWithEmailAndPassword(email.value, password.value)
+    // 登入成功後，將 email 存入 localStorage
+    localStorage.setItem('lastLoginEmail', email.value)
     // 登入成功後，可以透過路由導向到主頁面
     // 例如：router.push('/dashboard');
     errorMessage.value = '';

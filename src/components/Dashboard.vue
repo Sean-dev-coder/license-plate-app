@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, nextTick } from 'vue'
-import { auth, db } from '../firebase.js'
+import { auth, db, storage } from '../firebase.js'
 
 // --- 狀態變數 (維持不變) ---
 const searchPlate = ref('')
@@ -34,33 +34,49 @@ const handleSearch = async () => {
   showCreateForm.value = false
 
   try {
-    // 1. 將使用者輸入的字串，用空格拆成一個關鍵字陣列
     const searchInputString = searchPlate.value.toUpperCase().trim()
-    const searchTerms = searchInputString.split(' ').filter(term => term.length > 0)
 
-    if (searchTerms.length === 0) {
-      return
-    }
+    // +++ 新增的程式碼：立刻清空輸入框 +++
+    searchPlate.value = ''
+    
+    // 智慧判斷：如果輸入包含 '-', 則執行精準查詢
+    if (searchInputString.includes('-')) {
+      const docRef = db.collection('licensePlates').doc(searchInputString)
+      const docSnap = await docRef.get()
 
-    // Firestore 的 array-contains-any 查詢最多只支援 10 個元素
-    if (searchTerms.length > 10) {
-      alert('批次查詢一次最多只能輸入 10 個關鍵字。')
-      return
-    }
-
-    // 2. 使用 array-contains-any 進行查詢
-    const querySnapshot = await db.collection('licensePlates')
-                                  .where('searchKeywords', 'array-contains-any', searchTerms)
-                                  .get()
-
-    if (!querySnapshot.empty) {
-      searchResults.value = querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }))
+      if (docSnap.exists) {
+        // 精準查詢有結果，直接放入列表並選中
+        const result = { id: docSnap.id, ...docSnap.data() }
+        searchResults.value = [result]
+        selectItem(result)
+      } else {
+        // 精準查詢無結果，顯示新增表單
+        message.value = `查無車牌「${searchInputString}」，您可以新增此筆資料。`
+        isSuccess.value = false
+        showCreateForm.value = true
+        plateToCreate.value = searchInputString
+        selectedItem.value = { householdCode: '', notes: '' }
+      }
     } else {
-      message.value = `查無任何包含關鍵字「${searchTerms.join(', ')}」的資料。`
-      isSuccess.value = false
+      // 不含 '-', 執行多關鍵字查詢
+      const searchTerms = searchInputString.split(' ').filter(term => term.length > 0)
+      if (searchTerms.length === 0) return
+      if (searchTerms.length > 10) {
+        alert('批次查詢一次最多只能輸入 10 個關鍵字。')
+        isLoading.value = false
+        return
+      }
+
+      const querySnapshot = await db.collection('licensePlates')
+                                    .where('searchKeywords', 'array-contains-any', searchTerms)
+                                    .get()
+
+      if (!querySnapshot.empty) {
+        searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      } else {
+        message.value = `查無任何包含關鍵字「${searchTerms.join(', ')}」的資料。`
+        isSuccess.value = false
+      }
     }
   } catch (error) {
     console.error("查詢失敗:", error)
@@ -68,9 +84,14 @@ const handleSearch = async () => {
     isSuccess.value = false
   } finally {
     isLoading.value = false
+    // +++ 新增的程式碼：將焦點重新設定回輸入框 +++
+    nextTick(() => {
+      if (searchInput.value) {
+        searchInput.value.focus()
+      }
+    })
   }
 }
-
 
 const selectItem = (item) => {
   selectedItem.value = { ...item }
@@ -83,12 +104,10 @@ const handleUpdate = async () => {
   if (!selectedItem.value || !selectedItem.value.id) return
   // ... (此處程式碼不變)
 }
-
 const handleCreate = async () => {
    if (!plateToCreate.value) return
   // ... (此處程式碼不變)
 }
-
 const handleDelete = async () => {
   if (!selectedItem.value || !selectedItem.value.id) return
   // ... (此處程式碼不變)

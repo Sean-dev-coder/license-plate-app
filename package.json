@@ -12,7 +12,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "csv-parser": "^3.2.0",
     "firebase": "^8.10.1",
+    "firebase-admin": "^13.5.0",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1"
   },
