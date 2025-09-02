@@ -10,6 +10,7 @@ const props = defineProps({
   }
 })
 
+// --- 狀態變數 ---
 const searchPlate = ref('')
 const isLoading = ref(false)
 const message = ref('')
@@ -21,10 +22,21 @@ const showCreateForm = ref(false)
 const plateToCreate = ref('')
 const selectedFile = ref(null)
 const isUploading = ref(false)
+const isNumericMode = ref(true) // 控制鍵盤模式的狀態
 
+// --- 生命週期鉤子 ---
 onMounted(() => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
+
+// --- 核心功能函式 ---
+const toggleInputMode = () => {
+  nextTick(() => {
+    if (searchInput.value) {
+      searchInput.value.focus()
+    }
+  })
+}
 
 const handleSearch = async () => {
   if (!searchPlate.value) { alert('請輸入查詢關鍵字！'); return }
@@ -139,8 +151,30 @@ const handleImageUpload = async () => {
 <template>
   <div class="dashboard">
     <div class="search-section">
-      <input ref="searchInput" inputmode="numeric" v-model="searchPlate" @keyup.enter="handleSearch" placeholder="請輸入車牌號碼查詢或新增" />
-      <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
+      <input 
+        ref="searchInput"
+        v-model="searchPlate" 
+        @keyup.enter="handleSearch"
+        placeholder="請輸入車牌號碼查詢或新增"
+        :inputmode="isNumericMode ? 'numeric' : 'text'"  
+      />
+      
+      <div class="toggle-switch-container">
+        <input 
+          type="checkbox" 
+          id="inputModeToggle" 
+          v-model="isNumericMode" 
+          @change="toggleInputMode" 
+        />
+        <label for="inputModeToggle" class="switch">
+          <span class="text-off">英文</span>
+          <span class="text-on">數字</span>
+        </label>
+      </div>
+
+      <button @click="handleSearch" :disabled="isLoading">
+        {{ isLoading ? '處理中...' : '查詢' }}
+      </button>
     </div>
 
     <div v-if="searchResults.length > 0" class="results-list">
@@ -189,7 +223,7 @@ const handleImageUpload = async () => {
 
 <style scoped>
 .dashboard { margin-top: 20px; }
-.search-section { display: flex; gap: 10px; }
+.search-section { display: flex; gap: 10px; align-items: center; }
 .search-section input { flex-grow: 1; }
 .result-section { margin-top: 20px; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
 .form-group { margin-bottom: 15px; }
@@ -208,4 +242,39 @@ const handleImageUpload = async () => {
 .image-upload { margin-top: 10px; }
 .image-upload button { margin-left: 10px; }
 @media (max-width: 480px) { .search-section { flex-direction: column; align-items: stretch; } }
+
+/* 切換開關的 CSS 樣式 */
+.toggle-switch-container { flex-shrink: 0; position: relative; height: 34px; display: flex; align-items: center; }
+.toggle-switch-container input[type="checkbox"] { display: none; }
+.switch { position: relative; display: inline-block; width: 90px; height: 34px; background-color: #ccc; border-radius: 34px; transition: background-color 0.2s; cursor: pointer; overflow: hidden; }
+.switch:before {
+  content: "";
+  position: absolute;
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+}
+.toggle-switch-container input[type="checkbox"]:checked + .switch { background-color: #007bff; }
+.toggle-switch-container input[type="checkbox"]:checked + .switch:before { transform: translateX(56px); }
+.text-off, .text-on {
+  position: absolute;
+  color: white;
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 34px;
+  text-align: center;
+  width: 50%;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+.text-off { right: 0; opacity: 1; }
+.text-on { left: 0; opacity: 0; }
+.toggle-switch-container input[type="checkbox"]:checked + .switch .text-off { opacity: 0; }
+.toggle-switch-container input[type="checkbox"]:checked + .switch .text-on { opacity: 1; }
 </style>
