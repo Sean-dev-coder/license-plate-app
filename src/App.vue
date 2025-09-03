@@ -5,21 +5,17 @@ import Login from './components/Login.vue'
 import Dashboard from './components/Dashboard.vue'
 
 const isLoggedIn = ref(false)
-const collectionName = ref('licensePlates') // 預設為正式資料
+const collectionName = ref('licensePlates')
 
 onMounted(() => {
   auth.onAuthStateChanged((user) => {
     if (user) {
       isLoggedIn.value = true
-      
       if (user.email === 'test@gmail.com') {
-        console.log('測試人員登入，切換到 licensePlates_test 集合')
         collectionName.value = 'licensePlates_test'
       } else {
-        console.log('一般使用者登入，使用 licensePlates 集合')
         collectionName.value = 'licensePlates'
       }
-
     } else {
       isLoggedIn.value = false
     }
@@ -32,33 +28,32 @@ const handleLogout = () => {
 </script>
 
 <template>
-  <main>
-    <div v-if="!isLoggedIn">
+  <div v-if="!isLoggedIn">
+    <main class="login-main">
       <Login />
-    </div>
-    <div v-else>
+    </main>
+  </div>
+
+  <div v-else>
+    <header class="app-header">
+      <h1 class="app-title">車牌管理系統</h1>
+      <button @click="handleLogout" class="logout-button">登出</button>
+    </header>
+
+    <main>
       <Dashboard :collection="collectionName" />
-      <hr style="margin-top: 30px; border: 1px solid #eee;">
-      <button @click="handleLogout" style="background-color: #6c757d; display: block; margin: 20px auto 0;">登出</button>
-    </div>
-  </main>
+    </main>
+  </div>
 </template>
 
 <style>
+/* --- 全域樣式 --- */
 body {
-  font-family: sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background-color: #f0f2f5;
   margin: 0;
-  padding: 10px;
 }
-main {
-  max-width: 800px;
-  margin: 20px auto;
-  background-color: white;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-}
+
 button {
   cursor: pointer;
   padding: 10px 15px;
@@ -68,6 +63,7 @@ button {
   color: white;
   font-size: 16px;
 }
+
 input, textarea {
   width: 100%;
   padding: 12px;
@@ -76,16 +72,65 @@ input, textarea {
   border: 1px solid #ccc;
   box-sizing: border-box;
 }
+
 h1, h2, h3, h4 {
   text-align: center;
 }
+
+/* --- App Header 樣式 --- */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 24px;
+  background-color: white;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  margin-bottom: 20px;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #333;
+  text-align: left; /* 讓標題靠左 */
+}
+
+.logout-button {
+  background-color: #6c757d;
+  margin: 0;
+}
+
+/* --- 主要內容區塊樣式 --- */
+main {
+  max-width: 800px;
+  margin: 0 auto; /* 水平置中 */
+  padding: 0 20px 20px 20px; /* 左右和下方留白 */
+}
+
+/* 登入頁的卡片樣式 */
+.login-main {
+    padding-top: 40px;
+}
+.login-main > div {
+    max-width: 500px;
+    margin: 0 auto;
+    background-color: white;
+    padding: 30px;
+    border-radius: 8px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+/* --- 響應式設計 --- */
 @media (max-width: 600px) {
   main {
-    margin: 10px;
-    padding: 15px;
+    padding: 0 15px 15px 15px;
   }
-  h1, h2 {
-    font-size: 1.5rem;
+  .app-header {
+    padding: 10px 15px;
+    margin-bottom: 15px;
+  }
+  .app-title {
+    font-size: 1.1rem;
   }
 }
 </style>
