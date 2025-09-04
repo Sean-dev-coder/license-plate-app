@@ -19,36 +19,22 @@ const selectedFile = ref(null)
 const isUploading = ref(false)
 const isNumericMode = ref(true)
 const searchMode = ref('plate')
+const editSectionRef = ref(null) // 新增 Ref
 
 onMounted(() => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
-// +++ 新增的函式 +++
-const quickSearch = (term, mode = 'plate') => {
-  if (!term) return // 防止點到不存在的部分 (例如沒有'-'的車牌)
-  searchPlate.value = term
-  searchMode.value = mode
-  handleSearch()
-}
-
 const changeSearchMode = (mode) => {
   searchMode.value = mode
-  if (mode === 'household') {
-    isNumericMode.value = false
-  } else {
-    isNumericMode.value = true
-  }
-  nextTick(() => {
-    if (searchInput.value) searchInput.value.focus()
-  })
+  if (mode === 'household') { isNumericMode.value = false } 
+  else { isNumericMode.value = true }
+  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 }
 
 const toggleInputMode = () => {
   //isNumericMode.value = !isNumericMode.value
-  nextTick(() => {
-    if (searchInput.value) searchInput.value.focus()
-  })
+  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 }
 
 const handleSearch = async () => {
@@ -99,7 +85,16 @@ const handleSearch = async () => {
 }
 
 const selectItem = (item) => {
-  selectedItem.value = { ...item }; selectedFile.value = null; showCreateForm.value = false; message.value = ''
+  selectedItem.value = { ...item }
+  selectedFile.value = null
+  showCreateForm.value = false
+  message.value = ''
+  // 新增的捲動邏輯
+  nextTick(() => {
+    if (editSectionRef.value) {
+      editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  })
 }
 
 const handleUpdate = async () => {
@@ -214,7 +209,11 @@ const handleImageUpload = async () => {
       <hr>
     </div>
 
-    <div v-if="selectedItem && !showCreateForm" class="result-section">
+    <div 
+      v-if="selectedItem && !showCreateForm" 
+      class="result-section"
+      ref="editSectionRef"
+    >
       <h3>編輯資料：{{ selectedItem.id }}</h3>
       <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" /></div>
       <div class="form-group"><label>備註:</label><textarea v-model="selectedItem.notes" rows="3"></textarea></div>
@@ -288,11 +287,9 @@ const handleImageUpload = async () => {
 .clickable-part, .household-part a { color: #007bff; text-decoration: none; cursor: pointer; }
 .household-part { margin-left: 8px; font-weight: normal; color: #6c757d; }
 .household-part a { font-weight: bold; }
-/* --- 新增：修正 .active 狀態下的文字顏色 --- */
 .results-list li.active .clickable-part,
 .results-list li.active .household-part,
 .results-list li.active .household-part a {
-  /* 讓所有內部的文字在 active 狀態下都變成白色 */
   color: white; 
 }
 </style>
