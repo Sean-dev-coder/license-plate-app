@@ -22,7 +22,8 @@ const showCreateForm = ref(false)
 const plateToCreate = ref('')
 const selectedFile = ref(null)
 const isUploading = ref(false)
-const isNumericMode = ref(true) // 控制鍵盤模式的狀態
+const isNumericMode = ref(true)
+const searchMode = ref('plate')
 
 // --- 生命週期鉤子 ---
 onMounted(() => {
@@ -30,7 +31,25 @@ onMounted(() => {
 })
 
 // --- 核心功能函式 ---
+
+// +++ 新增：一個函式同時控制兩種模式 +++
+const changeSearchMode = (mode) => {
+  searchMode.value = mode
+  if (mode === 'household') {
+    isNumericMode.value = false // 查戶號時，切換為英文/文字鍵盤
+  } else {
+    isNumericMode.value = true  // 查車牌時，預設回數字鍵盤
+  }
+  // 重新 focus 讓鍵盤更新
+  nextTick(() => {
+    if (searchInput.value) {
+      searchInput.value.focus()
+    }
+  })
+}
+
 const toggleInputMode = () => {
+  isNumericMode.value = !isNumericMode.value
   nextTick(() => {
     if (searchInput.value) {
       searchInput.value.focus()
@@ -39,41 +58,50 @@ const toggleInputMode = () => {
 }
 
 const handleSearch = async () => {
-  if (!searchPlate.value) { alert('請輸入查詢關鍵字！'); return }
-
+  if (!searchPlate.value) { alert('請輸入查詢內容！'); return }
   const searchInputString = searchPlate.value.toUpperCase().trim()
   searchPlate.value = ''
-
   isLoading.value = true
   searchResults.value = []
   selectedItem.value = null
   message.value = ''
   showCreateForm.value = false
-
   try {
-    if (searchInputString.includes('-')) {
-      const docRef = db.collection(props.collection).doc(searchInputString)
-      const docSnap = await docRef.get()
-      if (docSnap.exists) {
-        const result = { id: docSnap.id, ...docSnap.data() }; 
-        searchResults.value = [result]
-        selectItem(result)
-      } else {
-        message.value = `查無車牌「${searchInputString}」，您可以新增此筆資料。`; isSuccess.value = false; showCreateForm.value = true; plateToCreate.value = searchInputString; selectedItem.value = { householdCode: '', notes: '' }
-      }
+    let querySnapshot;
+    if (searchMode.value === 'household') {
+      querySnapshot = await db.collection(props.collection).where('householdCode', '==', searchInputString).get()
     } else {
-      const searchTerms = searchInputString.split(' ').filter(term => term.length > 0)
-      if (searchTerms.length === 0) { isLoading.value = false; return }
-      if (searchTerms.length > 10) { alert('批次查詢最多10個關鍵字。'); isLoading.value = false; return }
-      const querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
-      if (!querySnapshot.empty) {
-        searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      if (searchInputString.includes('-')) {
+        const docRef = db.collection(props.collection).doc(searchInputString)
+        const docSnap = await docRef.get()
+        if (docSnap.exists) {
+          const result = { id: docSnap.id, ...docSnap.data() }; searchResults.value = [result]; selectItem(result)
+        } else {
+          message.value = `查無車牌「${searchInputString}」，您可以新增此筆資料。`; isSuccess.value = false; showCreateForm.value = true; plateToCreate.value = searchInputString; selectedItem.value = { householdCode: '', notes: '' }
+        }
+        isLoading.value = false
+        return
       } else {
-        message.value = `查無任何包含關鍵字「${searchTerms.join(', ')}」的資料。`; isSuccess.value = false
+        const searchTerms = searchInputString.split(' ').filter(term => term.length > 0)
+        if (searchTerms.length > 10) { alert('批次查詢最多10個關鍵字。'); isLoading.value = false; return }
+        querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
       }
     }
-  } catch (error) { console.error("查詢失敗:", error); message.value = '查詢時發生錯誤'; isSuccess.value = false }
-  finally { isLoading.value = false; nextTick(() => { if (searchInput.value) searchInput.value.focus() }) }
+    if (querySnapshot && !querySnapshot.empty) {
+      searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+    } else {
+      if (!showCreateForm.value && !searchResults.value.length) {
+         message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
+      }
+    }
+  } catch (error) {
+    console.error("查詢失敗:", error)
+    message.value = '查詢時發生錯誤，請稍後再試。'
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+    nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+  }
 }
 
 const selectItem = (item) => {
@@ -150,16 +178,31 @@ const handleImageUpload = async () => {
 
 <template>
   <div class="dashboard">
+    <div class="search-mode-selector">
+      <button 
+        :class="{ active: searchMode === 'plate' }" 
+        @click="changeSearchMode('plate')"
+      >
+        查車牌
+      </button>
+      <button 
+        :class="{ active: searchMode === 'household' }" 
+        @click="changeSearchMode('household')"
+      >
+        查戶號
+      </button>
+    </div>
+
     <div class="search-section">
       <input 
         ref="searchInput"
         v-model="searchPlate" 
         @keyup.enter="handleSearch"
-        placeholder="請輸入車牌號碼查詢或新增"
+        :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢或新增' : '請輸入戶號查詢'"
         :inputmode="isNumericMode ? 'numeric' : 'text'"  
       />
       
-      <div class="toggle-switch-container">
+      <div v-if="searchMode === 'plate'" class="toggle-switch-container">
         <input 
           type="checkbox" 
           id="inputModeToggle" 
@@ -218,6 +261,7 @@ const handleImageUpload = async () => {
     <div v-if="message" class="message-section" :class="{ success: isSuccess }">
       <p>{{ message }}</p>
     </div>
+
   </div>
 </template>
 
@@ -241,38 +285,17 @@ const handleImageUpload = async () => {
 .image-preview img { width: 100%; height: auto; border-radius: 5px; border: 1px solid #eee; }
 .image-upload { margin-top: 10px; }
 .image-upload button { margin-left: 10px; }
+.search-mode-selector { display: flex; justify-content: center; margin-bottom: 15px; background-color: #e9ecef; border-radius: 8px; padding: 5px; }
+.search-mode-selector button { flex: 1; padding: 8px 10px; border: none; background-color: transparent; color: #495057; font-size: 1rem; font-weight: 500; border-radius: 6px; transition: background-color 0.2s, color 0.2s; }
+.search-mode-selector button.active { background-color: white; color: #007bff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 @media (max-width: 480px) { .search-section { flex-direction: column; align-items: stretch; } }
-
-/* 切換開關的 CSS 樣式 */
 .toggle-switch-container { flex-shrink: 0; position: relative; height: 34px; display: flex; align-items: center; }
 .toggle-switch-container input[type="checkbox"] { display: none; }
 .switch { position: relative; display: inline-block; width: 90px; height: 34px; background-color: #ccc; border-radius: 34px; transition: background-color 0.2s; cursor: pointer; overflow: hidden; }
-.switch:before {
-  content: "";
-  position: absolute;
-  height: 26px;
-  width: 26px;
-  left: 4px;
-  bottom: 4px;
-  background-color: white;
-  border-radius: 50%;
-  transition: transform 0.2s;
-  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
-  pointer-events: none;
-}
+.switch:before { content: ""; position: absolute; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2); pointer-events: none; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch { background-color: #007bff; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch:before { transform: translateX(56px); }
-.text-off, .text-on {
-  position: absolute;
-  color: white;
-  font-size: 14px;
-  font-weight: bold;
-  line-height: 34px;
-  text-align: center;
-  width: 50%;
-  transition: opacity 0.2s;
-  pointer-events: none;
-}
+.text-off, .text-on { position: absolute; color: white; font-size: 14px; font-weight: bold; line-height: 34px; text-align: center; width: 50%; transition: opacity 0.2s; pointer-events: none; }
 .text-off { right: 0; opacity: 1; }
 .text-on { left: 0; opacity: 0; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-off { opacity: 0; }
