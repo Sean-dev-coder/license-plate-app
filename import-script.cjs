@@ -27,7 +27,7 @@ fs.createReadStream('data.csv')
     results.forEach((record) => {
       const docId = record.DocumentID;
       if (docId) {
-        const docRef = db.collection('licensePlates').doc(docId);
+        const docRef = db.collection('licensePlates_test').doc(docId);
 
         // 4. 準備要寫入的資料，並自動產生 searchKeywords
         const keywords = docId.toUpperCase().split('-').filter(Boolean);
