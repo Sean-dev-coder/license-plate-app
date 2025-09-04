@@ -2,15 +2,10 @@
 import { ref, onMounted, nextTick } from 'vue'
 import { auth, db, storage } from '../firebase.js'
 
-// 1. 接收從父元件傳來的 prop
 const props = defineProps({
-  collection: {
-    type: String,
-    required: true
-  }
+  collection: { type: String, required: true }
 })
 
-// --- 狀態變數 ---
 const searchPlate = ref('')
 const isLoading = ref(false)
 const message = ref('')
@@ -25,35 +20,34 @@ const isUploading = ref(false)
 const isNumericMode = ref(true)
 const searchMode = ref('plate')
 
-// --- 生命週期鉤子 ---
 onMounted(() => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
-// --- 核心功能函式 ---
+// +++ 新增的函式 +++
+const quickSearch = (term, mode = 'plate') => {
+  if (!term) return // 防止點到不存在的部分 (例如沒有'-'的車牌)
+  searchPlate.value = term
+  searchMode.value = mode
+  handleSearch()
+}
 
-// +++ 新增：一個函式同時控制兩種模式 +++
 const changeSearchMode = (mode) => {
   searchMode.value = mode
   if (mode === 'household') {
-    isNumericMode.value = false // 查戶號時，切換為英文/文字鍵盤
+    isNumericMode.value = false
   } else {
-    isNumericMode.value = true  // 查車牌時，預設回數字鍵盤
+    isNumericMode.value = true
   }
-  // 重新 focus 讓鍵盤更新
   nextTick(() => {
-    if (searchInput.value) {
-      searchInput.value.focus()
-    }
+    if (searchInput.value) searchInput.value.focus()
   })
 }
 
 const toggleInputMode = () => {
   //isNumericMode.value = !isNumericMode.value
   nextTick(() => {
-    if (searchInput.value) {
-      searchInput.value.focus()
-    }
+    if (searchInput.value) searchInput.value.focus()
   })
 }
 
@@ -179,18 +173,8 @@ const handleImageUpload = async () => {
 <template>
   <div class="dashboard">
     <div class="search-mode-selector">
-      <button 
-        :class="{ active: searchMode === 'plate' }" 
-        @click="changeSearchMode('plate')"
-      >
-        查車牌
-      </button>
-      <button 
-        :class="{ active: searchMode === 'household' }" 
-        @click="changeSearchMode('household')"
-      >
-        查戶號
-      </button>
+      <button :class="{ active: searchMode === 'plate' }" @click="changeSearchMode('plate')">查車牌</button>
+      <button :class="{ active: searchMode === 'household' }" @click="changeSearchMode('household')">查戶號</button>
     </div>
 
     <div class="search-section">
@@ -201,30 +185,30 @@ const handleImageUpload = async () => {
         :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢或新增' : '請輸入戶號查詢'"
         :inputmode="isNumericMode ? 'numeric' : 'text'"  
       />
-      
       <div v-if="searchMode === 'plate'" class="toggle-switch-container">
-        <input 
-          type="checkbox" 
-          id="inputModeToggle" 
-          v-model="isNumericMode" 
-          @change="toggleInputMode" 
-        />
+        <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
         <label for="inputModeToggle" class="switch">
           <span class="text-off">英文</span>
           <span class="text-on">數字</span>
         </label>
       </div>
-
-      <button @click="handleSearch" :disabled="isLoading">
-        {{ isLoading ? '處理中...' : '查詢' }}
-      </button>
+      <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
     </div>
 
     <div v-if="searchResults.length > 0" class="results-list">
       <h4>找到了 {{ searchResults.length }} 筆結果：</h4>
       <ul>
         <li v-for="item in searchResults" :key="item.id" @click="selectItem(item)" :class="{ active: selectedItem && selectedItem.id === item.id }">
-          <strong>{{ item.id }}</strong> (戶號: {{ item.householdCode }})
+          <div class="list-item-content">
+            <span class="clickable-part" @click.stop="quickSearch(item.id.split('-')[0])">{{ item.id.split('-')[0] }}</span>
+            -
+            <span class="clickable-part" @click.stop="quickSearch(item.id.split('-')[1])">{{ item.id.split('-')[1] }}</span>
+            <span class="household-part">
+              (戶號: 
+              <a href="#" @click.prevent.stop="quickSearch(item.householdCode, 'household')">{{ item.householdCode }}</a>
+              )
+            </span>
+          </div>
         </li>
       </ul>
       <hr>
@@ -261,7 +245,6 @@ const handleImageUpload = async () => {
     <div v-if="message" class="message-section" :class="{ success: isSuccess }">
       <p>{{ message }}</p>
     </div>
-
   </div>
 </template>
 
@@ -278,7 +261,7 @@ const handleImageUpload = async () => {
 .message-section { margin-top: 20px; text-align: center; color: #888; }
 .message-section.success p { color: #28a745; font-weight: bold; }
 .results-list ul { list-style: none; padding: 0; margin: 0; }
-.results-list li { padding: 10px 15px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 5px; cursor: pointer; transition: background-color 0.2s; }
+.results-list li { padding: 12px 15px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 5px; cursor: pointer; transition: background-color 0.2s; }
 .results-list li:hover { background-color: #f5f5f5; }
 .results-list li.active { background-color: #007bff; color: white; border-color: #007bff; }
 .image-preview { margin-top: 10px; width: 100%; max-width: 300px; }
@@ -300,4 +283,16 @@ const handleImageUpload = async () => {
 .text-on { left: 0; opacity: 0; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-off { opacity: 0; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-on { opacity: 1; }
+
+.list-item-content { font-weight: bold; }
+.clickable-part, .household-part a { color: #007bff; text-decoration: none; cursor: pointer; }
+.household-part { margin-left: 8px; font-weight: normal; color: #6c757d; }
+.household-part a { font-weight: bold; }
+/* --- 新增：修正 .active 狀態下的文字顏色 --- */
+.results-list li.active .clickable-part,
+.results-list li.active .household-part,
+.results-list li.active .household-part a {
+  /* 讓所有內部的文字在 active 狀態下都變成白色 */
+  color: white; 
+}
 </style>
