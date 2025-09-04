@@ -71,6 +71,7 @@ input, textarea {
   border-radius: 5px;
   border: 1px solid #ccc;
   box-sizing: border-box;
+  font-size: 16px;
 }
 
 h1, h2, h3, h4 {
