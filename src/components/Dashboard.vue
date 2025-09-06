@@ -6,6 +6,7 @@ const props = defineProps({
   collection: { type: String, required: true }
 })
 
+// --- 狀態變數 ---
 const searchPlate = ref('')
 const isLoading = ref(false)
 const message = ref('')
@@ -21,10 +22,19 @@ const isNumericMode = ref(true)
 const searchMode = ref('plate')
 const editSectionRef = ref(null)
 const notesTextarea = ref(null)
+const isEditing = ref(false)
+const itemBeforeEdit = ref(null)
 
 onMounted(() => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
+
+const quickSearch = (term, mode = 'plate') => {
+  if (!term) return // 防止點到不存在的部分 (例如沒有'-'的車牌)
+  searchPlate.value = term
+  searchMode.value = mode
+  handleSearch()
+}
 
 const adjustTextareaHeight = () => {
   nextTick(() => {
@@ -41,6 +51,19 @@ watch(selectedItem, (newItem) => {
     adjustTextareaHeight()
   }
 })
+
+const enterEditMode = () => {
+  itemBeforeEdit.value = { ...selectedItem.value }
+  isEditing.value = true
+  nextTick(() => {
+    adjustTextareaHeight()
+  })
+}
+
+const cancelEdit = () => {
+  selectedItem.value = { ...itemBeforeEdit.value }
+  isEditing.value = false
+}
 
 const changeSearchMode = (mode) => {
   searchMode.value = mode
@@ -91,23 +114,13 @@ const handleSearch = async () => {
          message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
       }
     }
-  } catch (error) {
-    console.error("查詢失敗:", error)
-    message.value = '查詢時發生錯誤，請稍後再試。'
-    isSuccess.value = false
-  } finally {
-    isLoading.value = false
-    nextTick(() => { if (searchInput.value) searchInput.value.focus() })
-  }
+  } catch (error) { console.error("查詢失敗:", error); message.value = '查詢時發生錯誤'; isSuccess.value = false }
+  finally { isLoading.value = false; nextTick(() => { if (searchInput.value) searchInput.value.focus() }) }
 }
 
 const selectItem = (item) => {
-  selectedItem.value = { ...item }; selectedFile.value = null; showCreateForm.value = false; message.value = ''
-  nextTick(() => {
-    if (editSectionRef.value) {
-      editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  })
+  selectedItem.value = { ...item }; isEditing.value = false; selectedFile.value = null; showCreateForm.value = false; message.value = ''
+  nextTick(() => { if (editSectionRef.value) { editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' }); } })
 }
 
 const handleUpdate = async () => {
@@ -119,7 +132,8 @@ const handleUpdate = async () => {
     await docRef.update(dataToUpdate)
     message.value = '資料更新成功！'; isSuccess.value = true
     const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
-    if (index !== -1) { searchResults.value[index] = { ...searchResults.value[index], ...dataToUpdate } }
+    if (index !== -1) { searchResults.value[index] = { ...selectedItem.value } }
+    isEditing.value = false
   } catch (error) { console.error("更新失敗:", error); message.value = '更新失敗'; isSuccess.value = false }
   finally { isLoading.value = false }
 }
@@ -223,20 +237,22 @@ const handleImageUpload = async () => {
     </div>
 
     <div 
-      v-if="selectedItem && !showCreateForm" 
-      class="result-section"
+      v-if="selectedItem && !isEditing && !showCreateForm" 
+      class="result-section view-mode"
       ref="editSectionRef"
     >
-      <h3>編輯資料：{{ selectedItem.id }}</h3>
-      <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" /></div>
+      <h3>資料詳情：{{ selectedItem.id }}</h3>
+      <div class="actions">
+        <button @click="enterEditMode" class="edit-button">✏️ 編輯</button>
+        <button @click="handleDelete" :disabled="isLoading" class="delete-button">🗑️ 刪除</button>
+      </div>
+      <div class="form-group">
+        <label>戶別代碼:</label>
+        <p>{{ selectedItem.householdCode }}</p>
+      </div>
       <div class="form-group">
         <label>備註:</label>
-        <textarea 
-          ref="notesTextarea"
-          v-model="selectedItem.notes" 
-          rows="3"
-          @input="adjustTextareaHeight"
-        ></textarea>
+        <p class="notes-display">{{ selectedItem.notes }}</p>
       </div>
       <div class="form-group">
         <label>相關圖片:</label>
@@ -249,9 +265,30 @@ const handleImageUpload = async () => {
           <button @click="handleImageUpload" :disabled="isUploading || !selectedFile">{{ isUploading ? '上傳中...' : '上傳圖片' }}</button>
         </div>
       </div>
+    </div>
+    
+    <div 
+      v-if="selectedItem && isEditing && !showCreateForm" 
+      class="result-section edit-mode"
+      ref="editSectionRef"
+    >
+      <h3>編輯資料：{{ selectedItem.id }}</h3>
+      <div class="form-group">
+        <label>戶別代碼:</label>
+        <input v-model="selectedItem.householdCode" />
+      </div>
+      <div class="form-group">
+        <label>備註:</label>
+        <textarea 
+          ref="notesTextarea"
+          v-model="selectedItem.notes" 
+          rows="3"
+          @input="adjustTextareaHeight"
+        ></textarea>
+      </div>
       <div class="actions">
-        <button @click="handleUpdate" :disabled="isLoading" class="save-button">儲存更新</button>
-        <button @click="handleDelete" :disabled="isLoading" class="delete-button">刪除資料</button>
+        <button @click="handleUpdate" :disabled="isLoading" class="save-button">✅ 儲存</button>
+        <button @click="cancelEdit" :disabled="isLoading" class="cancel-button">❌ 取消</button>
       </div>
     </div>
 
@@ -275,7 +312,7 @@ const handleImageUpload = async () => {
 .result-section { margin-top: 20px; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
 .form-group { margin-bottom: 15px; }
 .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
-.actions { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; }
+.actions { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 0; }
 .save-button { background-color: #28a745; }
 .delete-button { background-color: #dc3545; }
 .message-section { margin-top: 20px; text-align: center; color: #888; }
@@ -303,7 +340,6 @@ const handleImageUpload = async () => {
 .text-on { left: 0; opacity: 0; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-off { opacity: 0; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-on { opacity: 1; }
-
 .list-item-content { font-weight: bold; }
 .clickable-part, .household-part a { color: #007bff; text-decoration: none; cursor: pointer; }
 .household-part { margin-left: 8px; font-weight: normal; color: #6c757d; }
@@ -317,5 +353,23 @@ textarea {
   transition: height 0.1s ease-out;
   resize: none;
   overflow-y: hidden;
+}
+.view-mode .form-group p {
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  border: 1px solid #dee2e6;
+  margin: 8px 0;
+  min-height: 20px;
+}
+.view-mode .notes-display {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.edit-button {
+  background-color: #ffc107;
+}
+.cancel-button {
+  background-color: #6c757d;
 }
 </style>
