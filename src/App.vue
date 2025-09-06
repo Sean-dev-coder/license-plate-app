@@ -52,6 +52,7 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   background-color: #f0f2f5;
   margin: 0;
+  touch-action: manipulation; 
 }
 
 button {
