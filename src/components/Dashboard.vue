@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, nextTick, watch } from 'vue'
+import { ref, onMounted, nextTick, watch, computed } from 'vue'
 import { auth, db, storage } from '../firebase.js'
 
 const props = defineProps({
@@ -29,8 +29,16 @@ onMounted(() => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
+// +++ 2. 新增 computed 屬性，自動判斷住戶集合名稱 +++
+const householdCollectionName = computed(() => {
+  return props.collection === 'licensePlates_test' 
+    ? 'households_test' 
+    : 'households';
+});
+// --- 核心功能函式 ---
+
 const quickSearch = (term, mode = 'plate') => {
-  if (!term) return // 防止點到不存在的部分 (例如沒有'-'的車牌)
+  if (!term) return
   searchPlate.value = term
   searchMode.value = mode
   handleSearch()
@@ -118,9 +126,45 @@ const handleSearch = async () => {
   finally { isLoading.value = false; nextTick(() => { if (searchInput.value) searchInput.value.focus() }) }
 }
 
-const selectItem = (item) => {
-  selectedItem.value = { ...item }; isEditing.value = false; selectedFile.value = null; showCreateForm.value = false; message.value = ''
-  nextTick(() => { if (editSectionRef.value) { editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' }); } })
+// vvv 這是我們唯一需要修改的函式 vvv
+const selectItem = async (item) => {
+  message.value = '正在載入詳細資料...'
+  isSuccess.value = false
+  isLoading.value = true
+
+  let completeItemData = { ...item }
+
+  if (item.householdCode) {
+    try {
+      // +++ 3. 使用我們新的 computed 屬性來查詢 +++
+      const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode)
+      const householdDocSnap = await householdDocRef.get()
+
+      if (householdDocSnap.exists) {
+        completeItemData.householdInfo = householdDocSnap.data()
+        console.log("成功載入住戶資料:", completeItemData.householdInfo)
+      } else {
+        console.log(`在 ${householdCollectionName.value} 中找不到戶號 ${item.householdCode}`);
+      }
+    } catch (error) {
+      console.error("載入住戶資料失敗:", error)
+      message.value = '載入住戶資料時發生錯誤。'
+    }
+  }
+
+  selectedItem.value = completeItemData
+
+  isEditing.value = false
+  selectedFile.value = null
+  showCreateForm.value = false
+  message.value = ''
+  isLoading.value = false
+
+  nextTick(() => {
+    if (editSectionRef.value) {
+      editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  })
 }
 
 const handleUpdate = async () => {
@@ -251,8 +295,18 @@ const handleImageUpload = async () => {
         <p>{{ selectedItem.householdCode }}</p>
       </div>
       <div class="form-group">
-        <label>備註:</label>
-        <p class="notes-display">{{ selectedItem.notes }}</p>
+        <label>綜合備註:</label>
+        <div class="combined-notes">
+          <div v-if="selectedItem.householdInfo && (selectedItem.householdInfo.name || selectedItem.householdInfo.features)" class="household-notes">
+            <h4>住戶資訊</h4>
+            <p v-if="selectedItem.householdInfo.name"><strong>戶長:</strong> {{ selectedItem.householdInfo.name }}</p>
+            <p v-if="selectedItem.householdInfo.features"><strong>特徵:</strong> {{ selectedItem.householdInfo.features }}</p>
+          </div>
+          <div v-if="selectedItem.notes" class="vehicle-notes">
+            <h4>車輛備註</h4>
+            <p class="notes-display">{{ selectedItem.notes }}</p>
+          </div>
+        </div>
       </div>
       <div class="form-group">
         <label>相關圖片:</label>
@@ -371,5 +425,26 @@ textarea {
 }
 .cancel-button {
   background-color: #6c757d;
+}
+.combined-notes {
+  padding: 12px;
+  background-color: #f8f9fa;
+  border-radius: 5px;
+  border: 1px solid #dee2e6;
+  margin: 8px 0;
+}
+.combined-notes h4 {
+  margin-top: 0;
+  margin-bottom: 8px;
+  font-size: 0.9rem;
+  color: #6c757d;
+  text-align: left;
+  border-bottom: 1px solid #e9ecef;
+  padding-bottom: 5px;
+}
+.combined-notes p {
+  margin: 0 0 5px 0;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 </style>
