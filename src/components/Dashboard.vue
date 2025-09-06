@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, onMounted, nextTick, watch } from 'vue'
 import { auth, db, storage } from '../firebase.js'
 
 const props = defineProps({
@@ -19,18 +19,28 @@ const selectedFile = ref(null)
 const isUploading = ref(false)
 const isNumericMode = ref(true)
 const searchMode = ref('plate')
-const editSectionRef = ref(null) // 新增 Ref
+const editSectionRef = ref(null)
+const notesTextarea = ref(null)
 
 onMounted(() => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
-const quickSearch = (term, mode = 'plate') => {
-  if (!term) return // 防止點到不存在的部分 (例如沒有'-'的車牌)
-  searchPlate.value = term
-  searchMode.value = mode
-  handleSearch()
+const adjustTextareaHeight = () => {
+  nextTick(() => {
+    const textarea = notesTextarea.value;
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+  });
 }
+
+watch(selectedItem, (newItem) => {
+  if (newItem) {
+    adjustTextareaHeight()
+  }
+})
 
 const changeSearchMode = (mode) => {
   searchMode.value = mode
@@ -40,7 +50,7 @@ const changeSearchMode = (mode) => {
 }
 
 const toggleInputMode = () => {
-  //isNumericMode.value = !isNumericMode.value
+  isNumericMode.value = !isNumericMode.value
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 }
 
@@ -92,11 +102,7 @@ const handleSearch = async () => {
 }
 
 const selectItem = (item) => {
-  selectedItem.value = { ...item }
-  selectedFile.value = null
-  showCreateForm.value = false
-  message.value = ''
-  // 新增的捲動邏輯
+  selectedItem.value = { ...item }; selectedFile.value = null; showCreateForm.value = false; message.value = ''
   nextTick(() => {
     if (editSectionRef.value) {
       editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -223,7 +229,15 @@ const handleImageUpload = async () => {
     >
       <h3>編輯資料：{{ selectedItem.id }}</h3>
       <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" /></div>
-      <div class="form-group"><label>備註:</label><textarea v-model="selectedItem.notes" rows="3"></textarea></div>
+      <div class="form-group">
+        <label>備註:</label>
+        <textarea 
+          ref="notesTextarea"
+          v-model="selectedItem.notes" 
+          rows="3"
+          @input="adjustTextareaHeight"
+        ></textarea>
+      </div>
       <div class="form-group">
         <label>相關圖片:</label>
         <div class="image-preview">
@@ -298,5 +312,10 @@ const handleImageUpload = async () => {
 .results-list li.active .household-part,
 .results-list li.active .household-part a {
   color: white; 
+}
+textarea {
+  transition: height 0.1s ease-out;
+  resize: none;
+  overflow-y: hidden;
 }
 </style>
