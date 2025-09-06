@@ -24,25 +24,20 @@ const editSectionRef = ref(null)
 const notesTextarea = ref(null)
 const isEditing = ref(false)
 const itemBeforeEdit = ref(null)
+const isHouseholdEditorOpen = ref(false)
+const householdDataToEdit = ref(null)
+const isNewHouseholdModalOpen = ref(false)
+const householdToCreate = ref({ id: '', name: '', features: '' })
 
-onMounted(() => {
-  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
-})
-
-// +++ 2. 新增 computed 屬性，自動判斷住戶集合名稱 +++
 const householdCollectionName = computed(() => {
   return props.collection === 'licensePlates_test' 
     ? 'households_test' 
     : 'households';
 });
-// --- 核心功能函式 ---
 
-const quickSearch = (term, mode = 'plate') => {
-  if (!term) return
-  searchPlate.value = term
-  searchMode.value = mode
-  handleSearch()
-}
+onMounted(() => {
+  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+})
 
 const adjustTextareaHeight = () => {
   nextTick(() => {
@@ -59,6 +54,62 @@ watch(selectedItem, (newItem) => {
     adjustTextareaHeight()
   }
 })
+
+const openHouseholdEditor = () => {
+  householdDataToEdit.value = { ...(selectedItem.value.householdInfo || {}) }
+  isHouseholdEditorOpen.value = true
+}
+
+const closeHouseholdEditor = () => {
+  isHouseholdEditorOpen.value = false
+  householdDataToEdit.value = null
+}
+
+const handleHouseholdUpdate = async () => {
+  if (!selectedItem.value.householdCode) return
+  isLoading.value = true
+  try {
+    const docRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode)
+    const dataToUpdate = {
+      name: householdDataToEdit.value.name || '',
+      features: householdDataToEdit.value.features || ''
+    }
+    await docRef.set(dataToUpdate, { merge: true })
+
+    selectedItem.value.householdInfo = { ...dataToUpdate }
+    message.value = '住戶資訊儲存成功！'
+    isSuccess.value = true
+    closeHouseholdEditor()
+  } catch (error) {
+    console.error("住戶資訊更新失敗:", error)
+    message.value = '住戶資訊更新失敗'
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const handleHouseholdCreate = async () => {
+  if (!householdToCreate.value.id) { alert('户号不能为空！'); return }
+  isLoading.value = true
+  try {
+    const docRef = db.collection(householdCollectionName.value).doc(householdToCreate.value.id)
+    const dataToCreate = {
+      name: householdToCreate.value.name || '',
+      features: householdToCreate.value.features || ''
+    }
+    await docRef.set(dataToCreate)
+    message.value = `户号「${householdToCreate.value.id}」的住户资讯已成功建立！`
+    isSuccess.value = true
+    isNewHouseholdModalOpen.value = false
+  } catch (error) {
+    console.error("建立住户失败:", error)
+    message.value = '建立住户失败'
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+  }
+}
 
 const enterEditMode = () => {
   itemBeforeEdit.value = { ...selectedItem.value }
@@ -98,6 +149,11 @@ const handleSearch = async () => {
     let querySnapshot;
     if (searchMode.value === 'household') {
       querySnapshot = await db.collection(props.collection).where('householdCode', '==', searchInputString).get()
+      if (querySnapshot.empty) {
+        message.value = `查无户号为「${searchInputString}」的车辆，您可以為此戶號建立住户資料。`
+        householdToCreate.value = { id: searchInputString, name: '', features: '' }
+        isNewHouseholdModalOpen.value = true
+      }
     } else {
       if (searchInputString.includes('-')) {
         const docRef = db.collection(props.collection).doc(searchInputString)
@@ -118,48 +174,44 @@ const handleSearch = async () => {
     if (querySnapshot && !querySnapshot.empty) {
       searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
     } else {
-      if (!showCreateForm.value && !searchResults.value.length) {
+      if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
          message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
       }
     }
-  } catch (error) { console.error("查詢失敗:", error); message.value = '查詢時發生錯誤'; isSuccess.value = false }
-  finally { isLoading.value = false; nextTick(() => { if (searchInput.value) searchInput.value.focus() }) }
+  } catch (error) {
+    console.error("查詢失敗:", error)
+    message.value = '查詢時發生錯誤，請稍後再試。'
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+    nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+  }
 }
 
-// vvv 這是我們唯一需要修改的函式 vvv
 const selectItem = async (item) => {
   message.value = '正在載入詳細資料...'
   isSuccess.value = false
   isLoading.value = true
-
   let completeItemData = { ...item }
-
   if (item.householdCode) {
     try {
-      // +++ 3. 使用我們新的 computed 屬性來查詢 +++
       const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode)
       const householdDocSnap = await householdDocRef.get()
-
       if (householdDocSnap.exists) {
         completeItemData.householdInfo = householdDocSnap.data()
-        console.log("成功載入住戶資料:", completeItemData.householdInfo)
       } else {
-        console.log(`在 ${householdCollectionName.value} 中找不到戶號 ${item.householdCode}`);
+        completeItemData.householdInfo = {} 
       }
     } catch (error) {
-      console.error("載入住戶資料失敗:", error)
-      message.value = '載入住戶資料時發生錯誤。'
+      console.error("載入住戶資料失敗:", error); message.value = '載入住戶資料時發生錯誤。'
     }
   }
-
   selectedItem.value = completeItemData
-
   isEditing.value = false
   selectedFile.value = null
   showCreateForm.value = false
   message.value = ''
   isLoading.value = false
-
   nextTick(() => {
     if (editSectionRef.value) {
       editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -287,7 +339,7 @@ const handleImageUpload = async () => {
     >
       <h3>資料詳情：{{ selectedItem.id }}</h3>
       <div class="actions">
-        <button @click="enterEditMode" class="edit-button">✏️ 編輯</button>
+        <button @click="enterEditMode" class="edit-button">✏️ 編輯車輛資訊</button>
         <button @click="handleDelete" :disabled="isLoading" class="delete-button">🗑️ 刪除</button>
       </div>
       <div class="form-group">
@@ -297,15 +349,25 @@ const handleImageUpload = async () => {
       <div class="form-group">
         <label>綜合備註:</label>
         <div class="combined-notes">
-          <div v-if="selectedItem.householdInfo && (selectedItem.householdInfo.name || selectedItem.householdInfo.features)" class="household-notes">
-            <h4>住戶資訊</h4>
-            <p v-if="selectedItem.householdInfo.name"><strong>戶長:</strong> {{ selectedItem.householdInfo.name }}</p>
-            <p v-if="selectedItem.householdInfo.features"><strong>特徵:</strong> {{ selectedItem.householdInfo.features }}</p>
+          <div v-if="selectedItem.householdInfo" class="household-notes">
+            <div class="notes-header">
+              <h4>住戶資訊</h4>
+              <button @click="openHouseholdEditor" class="inline-edit-button">✏️</button>
+            </div>
+            <div v-if="selectedItem.householdInfo.name || selectedItem.householdInfo.features">
+              <p v-if="selectedItem.householdInfo.name"><strong>戶長:</strong> {{ selectedItem.householdInfo.name }}</p>
+              <p v-if="selectedItem.householdInfo.features"><strong>特徵:</strong> {{ selectedItem.householdInfo.features }}</p>
+            </div>
+            <p v-else>尚無住戶資訊，點擊右方圖示新增。</p>
           </div>
           <div v-if="selectedItem.notes" class="vehicle-notes">
-            <h4>車輛備註</h4>
+            <div class="notes-header">
+              <h4>車輛備註</h4>
+              <button @click="enterEditMode" class="inline-edit-button">✏️</button>
+            </div>
             <p class="notes-display">{{ selectedItem.notes }}</p>
           </div>
+           <p v-if="!selectedItem.householdInfo && !selectedItem.notes">無任何備註。</p>
         </div>
       </div>
       <div class="form-group">
@@ -327,18 +389,10 @@ const handleImageUpload = async () => {
       ref="editSectionRef"
     >
       <h3>編輯資料：{{ selectedItem.id }}</h3>
-      <div class="form-group">
-        <label>戶別代碼:</label>
-        <input v-model="selectedItem.householdCode" />
-      </div>
+      <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" /></div>
       <div class="form-group">
         <label>備註:</label>
-        <textarea 
-          ref="notesTextarea"
-          v-model="selectedItem.notes" 
-          rows="3"
-          @input="adjustTextareaHeight"
-        ></textarea>
+        <textarea ref="notesTextarea" v-model="selectedItem.notes" rows="3" @input="adjustTextareaHeight"></textarea>
       </div>
       <div class="actions">
         <button @click="handleUpdate" :disabled="isLoading" class="save-button">✅ 儲存</button>
@@ -356,6 +410,44 @@ const handleImageUpload = async () => {
     <div v-if="message" class="message-section" :class="{ success: isSuccess }">
       <p>{{ message }}</p>
     </div>
+
+    <div v-if="isHouseholdEditorOpen" class="modal-overlay" @click.self="closeHouseholdEditor">
+      <div class="modal-content">
+        <h3>編輯住戶資訊 ({{ selectedItem.householdCode }})</h3>
+        <div class="form-group">
+          <label>戶長姓名:</label>
+          <input v-model="householdDataToEdit.name" />
+        </div>
+        <div class="form-group">
+          <label>家庭特徵:</label>
+          <textarea v-model="householdDataToEdit.features" rows="4"></textarea>
+        </div>
+        <div class="actions">
+          <button @click="handleHouseholdUpdate" :disabled="isLoading" class="save-button">✅ 儲存</button>
+          <button @click="closeHouseholdEditor" :disabled="isLoading" class="cancel-button">❌ 取消</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="isNewHouseholdModalOpen" class="modal-overlay" @click.self="isNewHouseholdModalOpen = false">
+      <div class="modal-content">
+        <h3>為新戶號建立資料 ({{ householdToCreate.id }})</h3>
+        <p>此戶號目前没有任何登记车辆，您可以先為它建立住户资讯。</p>
+        <div class="form-group">
+          <label>户长姓名:</label>
+          <input v-model="householdToCreate.name" />
+        </div>
+        <div class="form-group">
+          <label>家庭特徵:</label>
+          <textarea v-model="householdToCreate.features" rows="4"></textarea>
+        </div>
+        <div class="actions">
+          <button @click="handleHouseholdCreate" :disabled="isLoading" class="save-button">✅ 建立</button>
+          <button @click="isNewHouseholdModalOpen = false" :disabled="isLoading" class="cancel-button">❌ 取消</button>
+        </div>
+      </div>
+    </div>
+
   </div>
 </template>
 
@@ -422,6 +514,8 @@ textarea {
 }
 .edit-button {
   background-color: #ffc107;
+  font-size: 0.9rem;
+  padding: 8px 12px;
 }
 .cancel-button {
   background-color: #6c757d;
@@ -433,18 +527,52 @@ textarea {
   border: 1px solid #dee2e6;
   margin: 8px 0;
 }
-.combined-notes h4 {
-  margin-top: 0;
+.notes-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e9ecef;
+  padding-bottom: 5px;
   margin-bottom: 8px;
+}
+.notes-header h4 {
+  margin: 0;
+  padding: 0;
+  border: none;
   font-size: 0.9rem;
   color: #6c757d;
   text-align: left;
-  border-bottom: 1px solid #e9ecef;
-  padding-bottom: 5px;
+}
+.inline-edit-button {
+  background: none;
+  border: none;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0 5px;
 }
 .combined-notes p {
   margin: 0 0 5px 0;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: white;
+  padding: 20px 30px;
+  border-radius: 8px;
+  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+  width: 90%;
+  max-width: 500px;
 }
 </style>
