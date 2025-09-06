@@ -39,6 +39,13 @@ onMounted(() => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
+const quickSearch = (term, mode = 'plate') => {
+  if (!term) return // 防止點到不存在的部分 (例如沒有'-'的車牌)
+  searchPlate.value = term
+  searchMode.value = mode
+  handleSearch()
+}
+
 const adjustTextareaHeight = () => {
   nextTick(() => {
     const textarea = notesTextarea.value;
