@@ -22,6 +22,7 @@ const isNumericMode = ref(true)
 const searchMode = ref('plate')
 const editSectionRef = ref(null)
 const notesTextarea = ref(null)
+const featuresTextarea = ref(null)
 const isEditing = ref(false)
 const itemBeforeEdit = ref(null)
 const isNewHouseholdModalOpen = ref(false)
@@ -47,9 +48,15 @@ const quickSearch = (term, mode = 'plate') => {
 const adjustTextareaHeight = () => {
   nextTick(() => {
     const textarea = notesTextarea.value;
+    const textareaF = featuresTextarea.value;
+
     if (textarea) {
       textarea.style.height = 'auto';
       textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+    if (textareaF) {
+      textareaF.style.height = 'auto';
+      textareaF.style.height = `${textareaF.scrollHeight}px`;
     }
   });
 }
@@ -400,7 +407,7 @@ const handleImageUpload = async () => {
       </div>
       <div class="form-group">
         <label>家庭特徵:</label>
-        <textarea v-model="selectedItem.householdInfo.features" rows="4"></textarea>
+        <textarea ref="featuresTextarea" v-model="selectedItem.householdInfo.features" rows="4" @input="adjustTextareaHeight"></textarea>
       </div>
       <div class="actions">
         <button @click="saveAllChanges" :disabled="isLoading" class="save-button">✅ 儲存全部修改</button>
