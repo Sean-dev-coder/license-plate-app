@@ -24,8 +24,6 @@ const editSectionRef = ref(null)
 const notesTextarea = ref(null)
 const isEditing = ref(false)
 const itemBeforeEdit = ref(null)
-const isHouseholdEditorOpen = ref(false)
-const householdDataToEdit = ref(null)
 const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 
@@ -57,43 +55,22 @@ const adjustTextareaHeight = () => {
 }
 
 watch(selectedItem, (newItem) => {
-  if (newItem) {
+  if (newItem && isEditing.value) { // 只在編輯模式下載入時調整
     adjustTextareaHeight()
   }
 })
 
-const openHouseholdEditor = () => {
-  householdDataToEdit.value = { ...(selectedItem.value.householdInfo || {}) }
-  isHouseholdEditorOpen.value = true
+const enterEditMode = () => {
+  itemBeforeEdit.value = JSON.parse(JSON.stringify(selectedItem.value))
+  isEditing.value = true
+  nextTick(() => {
+    adjustTextareaHeight()
+  })
 }
 
-const closeHouseholdEditor = () => {
-  isHouseholdEditorOpen.value = false
-  householdDataToEdit.value = null
-}
-
-const handleHouseholdUpdate = async () => {
-  if (!selectedItem.value.householdCode) return
-  isLoading.value = true
-  try {
-    const docRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode)
-    const dataToUpdate = {
-      name: householdDataToEdit.value.name || '',
-      features: householdDataToEdit.value.features || ''
-    }
-    await docRef.set(dataToUpdate, { merge: true })
-
-    selectedItem.value.householdInfo = { ...dataToUpdate }
-    message.value = '住戶資訊儲存成功！'
-    isSuccess.value = true
-    closeHouseholdEditor()
-  } catch (error) {
-    console.error("住戶資訊更新失敗:", error)
-    message.value = '住戶資訊更新失敗'
-    isSuccess.value = false
-  } finally {
-    isLoading.value = false
-  }
+const cancelEdit = () => {
+  selectedItem.value = { ...itemBeforeEdit.value }
+  isEditing.value = false
 }
 
 const handleHouseholdCreate = async () => {
@@ -116,19 +93,6 @@ const handleHouseholdCreate = async () => {
   } finally {
     isLoading.value = false
   }
-}
-
-const enterEditMode = () => {
-  itemBeforeEdit.value = { ...selectedItem.value }
-  isEditing.value = true
-  nextTick(() => {
-    adjustTextareaHeight()
-  })
-}
-
-const cancelEdit = () => {
-  selectedItem.value = { ...itemBeforeEdit.value }
-  isEditing.value = false
 }
 
 const changeSearchMode = (mode) => {
@@ -207,7 +171,7 @@ const selectItem = async (item) => {
       if (householdDocSnap.exists) {
         completeItemData.householdInfo = householdDocSnap.data()
       } else {
-        completeItemData.householdInfo = {} 
+        completeItemData.householdInfo = { name: '', features: '' } 
       }
     } catch (error) {
       console.error("載入住戶資料失敗:", error); message.value = '載入住戶資料時發生錯誤。'
@@ -226,19 +190,47 @@ const selectItem = async (item) => {
   })
 }
 
-const handleUpdate = async () => {
+const saveAllChanges = async () => {
   if (!selectedItem.value || !selectedItem.value.id) return
   isLoading.value = true
+  
+  const plateDocRef = db.collection(props.collection).doc(selectedItem.value.id)
+  const householdDocRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode)
+
+  const plateData = {
+    householdCode: selectedItem.value.householdCode,
+    notes: selectedItem.value.notes,
+    lastUpdatedBy: auth.currentUser.email,
+    updatedAt: new Date()
+  }
+  
+  const householdData = {
+    name: selectedItem.value.householdInfo.name || '',
+    features: selectedItem.value.householdInfo.features || ''
+  }
+
   try {
-    const docRef = db.collection(props.collection).doc(selectedItem.value.id)
-    const dataToUpdate = { householdCode: selectedItem.value.householdCode, notes: selectedItem.value.notes, lastUpdatedBy: auth.currentUser.email, updatedAt: new Date() }
-    await docRef.update(dataToUpdate)
-    message.value = '資料更新成功！'; isSuccess.value = true
+    await Promise.all([
+      plateDocRef.update(plateData),
+      householdDocRef.set(householdData, { merge: true })
+    ])
+    
+    message.value = '所有資料更新成功！'
+    isSuccess.value = true
+    
     const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
-    if (index !== -1) { searchResults.value[index] = { ...selectedItem.value } }
+    if (index !== -1) { 
+      searchResults.value[index] = { ...selectedItem.value }
+    }
     isEditing.value = false
-  } catch (error) { console.error("更新失敗:", error); message.value = '更新失敗'; isSuccess.value = false }
-  finally { isLoading.value = false }
+    
+  } catch (error) {
+    console.error("儲存失敗:", error)
+    message.value = '儲存失敗，請稍後再試。'
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+  }
 }
 
 const handleCreate = async () => {
@@ -346,7 +338,7 @@ const handleImageUpload = async () => {
     >
       <h3>資料詳情：{{ selectedItem.id }}</h3>
       <div class="actions">
-        <button @click="enterEditMode" class="edit-button">✏️ 編輯車輛資訊</button>
+        <button @click="enterEditMode" class="edit-button">✏️ 編輯</button>
         <button @click="handleDelete" :disabled="isLoading" class="delete-button">🗑️ 刪除</button>
       </div>
       <div class="form-group">
@@ -359,18 +351,14 @@ const handleImageUpload = async () => {
           <div v-if="selectedItem.householdInfo" class="household-notes">
             <div class="notes-header">
               <h4>住戶資訊</h4>
-              <button @click="openHouseholdEditor" class="inline-edit-button">✏️</button>
             </div>
-            <div v-if="selectedItem.householdInfo.name || selectedItem.householdInfo.features">
-              <p v-if="selectedItem.householdInfo.name"><strong>戶長:</strong> {{ selectedItem.householdInfo.name }}</p>
-              <p v-if="selectedItem.householdInfo.features"><strong>特徵:</strong> {{ selectedItem.householdInfo.features }}</p>
-            </div>
-            <p v-else>尚無住戶資訊，點擊右方圖示新增。</p>
+            <p v-if="selectedItem.householdInfo.name"><strong>戶長:</strong> {{ selectedItem.householdInfo.name }}</p>
+            <p v-if="selectedItem.householdInfo.features"><strong>特徵:</strong> {{ selectedItem.householdInfo.features }}</p>
+            <p v-if="!selectedItem.householdInfo.name && !selectedItem.householdInfo.features">尚無住戶資訊。</p>
           </div>
           <div v-if="selectedItem.notes" class="vehicle-notes">
             <div class="notes-header">
               <h4>車輛備註</h4>
-              <button @click="enterEditMode" class="inline-edit-button">✏️</button>
             </div>
             <p class="notes-display">{{ selectedItem.notes }}</p>
           </div>
@@ -396,13 +384,26 @@ const handleImageUpload = async () => {
       ref="editSectionRef"
     >
       <h3>編輯資料：{{ selectedItem.id }}</h3>
-      <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" /></div>
       <div class="form-group">
-        <label>備註:</label>
+        <label>戶別代碼:</label>
+        <input v-model="selectedItem.householdCode" />
+      </div>
+      <div class="form-group">
+        <label>車輛備註:</label>
         <textarea ref="notesTextarea" v-model="selectedItem.notes" rows="3" @input="adjustTextareaHeight"></textarea>
       </div>
+      <hr>
+      <h4>住戶資訊</h4>
+      <div class="form-group">
+        <label>戶長姓名:</label>
+        <input v-model="selectedItem.householdInfo.name" />
+      </div>
+      <div class="form-group">
+        <label>家庭特徵:</label>
+        <textarea v-model="selectedItem.householdInfo.features" rows="4"></textarea>
+      </div>
       <div class="actions">
-        <button @click="handleUpdate" :disabled="isLoading" class="save-button">✅ 儲存</button>
+        <button @click="saveAllChanges" :disabled="isLoading" class="save-button">✅ 儲存全部修改</button>
         <button @click="cancelEdit" :disabled="isLoading" class="cancel-button">❌ 取消</button>
       </div>
     </div>
@@ -416,24 +417,6 @@ const handleImageUpload = async () => {
 
     <div v-if="message" class="message-section" :class="{ success: isSuccess }">
       <p>{{ message }}</p>
-    </div>
-
-    <div v-if="isHouseholdEditorOpen" class="modal-overlay" @click.self="closeHouseholdEditor">
-      <div class="modal-content">
-        <h3>編輯住戶資訊 ({{ selectedItem.householdCode }})</h3>
-        <div class="form-group">
-          <label>戶長姓名:</label>
-          <input v-model="householdDataToEdit.name" />
-        </div>
-        <div class="form-group">
-          <label>家庭特徵:</label>
-          <textarea v-model="householdDataToEdit.features" rows="4"></textarea>
-        </div>
-        <div class="actions">
-          <button @click="handleHouseholdUpdate" :disabled="isLoading" class="save-button">✅ 儲存</button>
-          <button @click="closeHouseholdEditor" :disabled="isLoading" class="cancel-button">❌ 取消</button>
-        </div>
-      </div>
     </div>
 
     <div v-if="isNewHouseholdModalOpen" class="modal-overlay" @click.self="isNewHouseholdModalOpen = false">
@@ -581,5 +564,10 @@ textarea {
   box-shadow: 0 5px 15px rgba(0,0,0,0.3);
   width: 90%;
   max-width: 500px;
+}
+hr {
+  border: none;
+  border-top: 1px solid #eee;
+  margin: 20px 0;
 }
 </style>
