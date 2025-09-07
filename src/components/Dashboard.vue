@@ -110,7 +110,6 @@ const changeSearchMode = (mode) => {
 }
 
 const toggleInputMode = () => {
-  isNumericMode.value = !isNumericMode.value
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 }
 
