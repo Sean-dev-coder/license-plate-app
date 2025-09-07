@@ -358,8 +358,8 @@ const handleImageUpload = async () => {
             <div class="notes-header">
               <h4>住戶資訊</h4>
             </div>
-            <p v-if="selectedItem.householdInfo.name"><strong>戶長:</strong> {{ selectedItem.householdInfo.name }}</p>
-            <p v-if="selectedItem.householdInfo.features"><strong>特徵:</strong> {{ selectedItem.householdInfo.features }}</p>
+            <p v-if="selectedItem.householdInfo.name"> {{ selectedItem.householdInfo.name }}</p>
+            <p v-if="selectedItem.householdInfo.features">{{ selectedItem.householdInfo.features }}</p>
             <p v-if="!selectedItem.householdInfo.name && !selectedItem.householdInfo.features">尚無住戶資訊。</p>
           </div>
           <div v-if="selectedItem.notes" class="vehicle-notes">
