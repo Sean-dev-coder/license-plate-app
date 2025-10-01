@@ -395,20 +395,19 @@ const handleImageUpload = async () => {
 
       <div v-if="searchResults.length > 0" class="results-list">
         <h4>找到了 {{ searchResults.length }} 筆結果：</h4>
-        <ul>
-          <li v-for="item in searchResults" :key="item.id" @click="selectItem(item)" :class="{ active: selectedItem && selectedItem.id === item.id }">
-            <div class="list-item-content">
-              <span class="clickable-part" @click.stop="quickSearch(item.id.split('-')[0])">{{ item.id.split('-')[0] }}</span>
-              -
-              <span class="clickable-part" @click.stop="quickSearch(item.id.split('-')[1])">{{ item.id.split('-')[1] }}</span>
-              <span class="household-part">
-                (戶號: 
-                <a href="#" @click.prevent.stop="quickSearch(item.householdCode, 'household')">{{ item.householdCode }}</a>
-                )
-              </span>
-            </div>
-          </li>
-        </ul>
+      <ul>
+        <li v-for="item in searchResults" :key="item.id" @click="selectItem(item)" :class="{ active: selectedItem && selectedItem.id === item.id }">
+          <div class="list-item-content">
+            <span class="plate-id">{{ item.id }}</span>
+            
+            <span class="household-part">
+              (戶號: 
+              <a href="#" @click.prevent.stop="quickSearch(item.householdCode, 'household')">{{ item.householdCode }}</a>
+              )
+            </span>
+          </div>
+        </li>
+      </ul>
         <hr>
       </div>
 
@@ -547,7 +546,7 @@ const handleImageUpload = async () => {
   margin: 1rem auto;
   max-width: 900px;
   border: 1px solid #ddd;
-  min-height: 200px; /* 避免圖片載入前跳動 */
+  min-height: 200px; 
   display: flex;
   align-items: center;
   justify-content: center;
@@ -608,13 +607,32 @@ const handleImageUpload = async () => {
 .text-on { left: 0; opacity: 0; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-off { opacity: 0; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-on { opacity: 1; }
-.list-item-content { font-weight: bold; }
-.clickable-part, .household-part a { color: #007bff; text-decoration: none; cursor: pointer; }
-.household-part { margin-left: 8px; font-weight: normal; color: #6c757d; }
-.household-part a { font-weight: bold; }
-.results-list li.active .clickable-part,
+
+/* --- 最終排版修正 --- */
+.list-item-content {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+.plate-id {
+  font-weight: bold;
+  white-space: normal; 
+  word-break: break-all;
+}
+.household-part {
+  font-weight: normal;
+  color: #6c757d;
+  white-space: nowrap; 
+  flex-shrink: 0; 
+}
+.household-part a {
+  font-weight: bold;
+  color: #007bff;
+  text-decoration: none;
+}
 .results-list li.active .household-part,
-.results-list li.active .household-part a {color: white; }
+.results-list li.active .household-part a { color: white; }
 textarea {transition: height 0.1s ease-out;resize: none;overflow-y: hidden;}
 .view-mode .form-group p {padding: 12px;background-color: #f8f9fa;border-radius: 5px; border: 1px solid #dee2e6;margin: 8px 0;min-height: 20px;}
 .view-mode .notes-display {white-space: pre-wrap;word-break: break-word;}
