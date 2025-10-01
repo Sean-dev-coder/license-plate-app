@@ -2,6 +2,10 @@
 import { ref, onMounted, nextTick, watch, computed } from 'vue'
 import { auth, db, storage } from '../firebase.js'
 
+// !!! 請將底下的網址換成您實際的住戶名單圖片網址 !!!
+const residentListImageUrl = ref('https://firebasestorage.googleapis.com/v0/b/license-plate-app-4b7d8.firebasestorage.app/o/plates%2Ffloors%2F1234.png?alt=media&token=d5a63ada-b584-49ce-98ee-7049b1726b62')
+// For example: 'https://i.imgur.com/your-actual-image.png'
+
 const props = defineProps({
   collection: { type: String, required: true }
 })
@@ -29,8 +33,8 @@ const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 
 const householdCollectionName = computed(() => {
-  return props.collection === 'licensePlates_test' 
-    ? 'households_test' 
+  return props.collection === 'licensePlates_test'
+    ? 'households_test'
     : 'households';
 });
 
@@ -104,9 +108,12 @@ const handleHouseholdCreate = async () => {
 
 const changeSearchMode = (mode) => {
   searchMode.value = mode
-  if (mode === 'household') { isNumericMode.value = false } 
+  if (mode === 'household') { isNumericMode.value = false }
   else { isNumericMode.value = true }
-  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+  // When switching to resident list, we don't need to focus the search input
+  if (mode !== 'residentList') {
+    nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+  }
 }
 
 const toggleInputMode = () => {
@@ -152,7 +159,7 @@ const handleSearch = async () => {
       searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
     } else {
       if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
-         message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
+        message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
       }
     }
   } catch (error) {
@@ -177,7 +184,7 @@ const selectItem = async (item) => {
       if (householdDocSnap.exists) {
         completeItemData.householdInfo = householdDocSnap.data()
       } else {
-        completeItemData.householdInfo = { name: '', features: '' } 
+        completeItemData.householdInfo = { name: '', features: '' }
       }
     } catch (error) {
       console.error("載入住戶資料失敗:", error); message.value = '載入住戶資料時發生錯誤。'
@@ -199,7 +206,7 @@ const selectItem = async (item) => {
 const saveAllChanges = async () => {
   if (!selectedItem.value || !selectedItem.value.id) return
   isLoading.value = true
-  
+
   const plateDocRef = db.collection(props.collection).doc(selectedItem.value.id)
   const householdDocRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode)
 
@@ -209,7 +216,7 @@ const saveAllChanges = async () => {
     lastUpdatedBy: auth.currentUser.email,
     updatedAt: new Date()
   }
-  
+
   const householdData = {
     name: selectedItem.value.householdInfo.name || '',
     features: selectedItem.value.householdInfo.features || ''
@@ -220,16 +227,16 @@ const saveAllChanges = async () => {
       plateDocRef.update(plateData),
       householdDocRef.set(householdData, { merge: true })
     ])
-    
+
     message.value = '所有資料更新成功！'
     isSuccess.value = true
-    
+
     const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
-    if (index !== -1) { 
+    if (index !== -1) {
       searchResults.value[index] = { ...selectedItem.value }
     }
     isEditing.value = false
-    
+
   } catch (error) {
     console.error("儲存失敗:", error)
     message.value = '儲存失敗，請稍後再試。'
@@ -240,7 +247,7 @@ const saveAllChanges = async () => {
 }
 
 const handleCreate = async () => {
-   if (!plateToCreate.value) return
+  if (!plateToCreate.value) return
   isLoading.value = true
   try {
     const docRef = db.collection(props.collection).doc(plateToCreate.value)
@@ -294,208 +301,452 @@ const handleImageUpload = async () => {
 </script>
 
 <template>
-  <div class="dashboard">
-    <div class="search-mode-selector">
-      <button :class="{ active: searchMode === 'plate' }" @click="changeSearchMode('plate')">查車牌</button>
-      <button :class="{ active: searchMode === 'household' }" @click="changeSearchMode('household')">查戶號</button>
-    </div>
+    <div class="dashboard">
+        <div class="search-mode-selector">
+            <button :class="{ active: searchMode === 'plate' }" @click="changeSearchMode('plate')">查車牌</button>
+            <button :class="{ active: searchMode === 'household' }" @click="changeSearchMode('household')">查戶號</button>
+            <button :class="{ active: searchMode === 'residentList' }" @click="changeSearchMode('residentList')">住戶名單</button>
+         </div>
 
-    <div class="search-section">
-      <input 
-        ref="searchInput"
-        v-model="searchPlate" 
-        @keyup.enter="handleSearch"
-        :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢或新增' : '請輸入戶號查詢'"
-        :inputmode="isNumericMode ? 'numeric' : 'text'"  
-      />
-      <div v-if="searchMode === 'plate'" class="toggle-switch-container">
-        <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
-        <label for="inputModeToggle" class="switch">
-          <span class="text-off">英文</span>
-          <span class="text-on">數字</span>
-        </label>
-      </div>
-      <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
-    </div>
+    <template v-if="searchMode !== 'residentList'">
+          <div class="search-section">
+              <input ref="searchInput" v-model="searchPlate" @keyup.enter="handleSearch" :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢或新增' : '請輸入戶號查詢'" :inputmode="isNumericMode ? 'numeric' : 'text'"/>
+              <div v-if="searchMode === 'plate'" class="toggle-switch-container">
+                  <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
+                  <label for="inputModeToggle" class="switch">
+                      <span class="text-off">英文</span>
+                      <span class="text-on">數字</span>
+                    </label>
+                </div>
+              <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
+            </div>
 
-    <div v-if="searchResults.length > 0" class="results-list">
-      <h4>找到了 {{ searchResults.length }} 筆結果：</h4>
-      <ul>
-        <li v-for="item in searchResults" :key="item.id" @click="selectItem(item)" :class="{ active: selectedItem && selectedItem.id === item.id }">
-          <div class="list-item-content">
-            <span class="clickable-part" @click.stop="quickSearch(item.id.split('-')[0])">{{ item.id.split('-')[0] }}</span>
-            -
-            <span class="clickable-part" @click.stop="quickSearch(item.id.split('-')[1])">{{ item.id.split('-')[1] }}</span>
-            <span class="household-part">
-              (戶號: 
-              <a href="#" @click.prevent.stop="quickSearch(item.householdCode, 'household')">{{ item.householdCode }}</a>
-              )
-            </span>
-          </div>
-        </li>
-      </ul>
-      <hr>
-    </div>
+          <div v-if="searchResults.length > 0" class="results-list">
+              <h4>找到了 {{ searchResults.length }} 筆結果：</h4>
+              <ul>
+                  <li v-for="item in searchResults" :key="item.id" @click="selectItem(item)"
+            :class="{ active: selectedItem && selectedItem.id === item.id }">
+                      <div class="list-item-content">
+                          <span class="clickable-part" @click.stop="quickSearch(item.id.split('-')[0])">{{
+                item.id.split('-')[0] }}</span>
+                          -
+                          <span class="clickable-part" @click.stop="quickSearch(item.id.split('-')[1])">{{
+                item.id.split('-')[1] }}</span>
+                          <span class="household-part">
+                              (戶號:
+                              <a href="#" @click.prevent.stop="quickSearch(item.householdCode, 'household')">{{
+                  item.householdCode }}</a>
+                              )
+                            </span>
+                        </div>
+                    </li>
+                </ul>
+             
+        <hr>
+           
+      </div>
 
-    <div 
-      v-if="selectedItem && !isEditing && !showCreateForm" 
-      class="result-section view-mode"
-      ref="editSectionRef"
-    >
-      <h3>資料詳情：{{ selectedItem.id }}</h3>
-      <div class="actions">
-        <button @click="enterEditMode" class="edit-button">✏️ 編輯</button>
-        <button @click="handleDelete" :disabled="isLoading" class="delete-button">🗑️ 刪除</button>
+          <div v-if="selectedItem && !isEditing && !showCreateForm" class="result-section view-mode"
+        ref="editSectionRef">
+              <h3>資料詳情：{{ selectedItem.id }}</h3>
+              <div class="actions">
+                  <button @click="enterEditMode" class="edit-button">✏️ 編輯</button>
+                  <button @click="handleDelete" :disabled="isLoading" class="delete-button">🗑️ 刪除</button>
+                </div>
+              <div class="form-group">
+                  <label>戶別代碼:</label>
+                  <p>{{ selectedItem.householdCode }}</p>
+                </div>
+              <div class="form-group">
+                  <label>綜合備註:</label>
+                  <div class="combined-notes">
+                      <div v-if="selectedItem.householdInfo" class="household-notes">
+                          <div class="notes-header">
+                              <h4>住戶資訊</h4>
+                            </div>
+                          <p v-if="selectedItem.householdInfo.name"> {{ selectedItem.householdInfo.name }}</p>
+                          <p v-if="selectedItem.householdInfo.features">{{ selectedItem.householdInfo.features }}</p>
+                          <p v-if="!selectedItem.householdInfo.name && !selectedItem.householdInfo.features">尚無住戶資訊。</p>
+                        </div>
+                      <div v-if="selectedItem.notes" class="vehicle-notes">
+                          <div class="notes-header">
+                              <h4>車輛備註</h4>
+                            </div>
+                          <p class="notes-display">{{ selectedItem.notes }}</p>
+                        </div>
+                       <p v-if="!selectedItem.householdInfo && !selectedItem.notes">無任何備註。</p>
+                    </div>
+                </div>
+              <div class="form-group">
+                  <label>相關圖片:</label>
+                  <div class="image-preview">
+                      <img v-if="selectedItem.imageUrl" :src="selectedItem.imageUrl" alt="車牌圖片" />
+                      <p v-else>尚無圖片</p>
+                    </div>
+                  <div class="image-upload">
+                      <input type="file" @change="handleFileSelect" accept="image/*" />
+                      <button @click="handleImageUpload" :disabled="isUploading || !selectedFile">{{ isUploading ?
+'上傳中...' : '上傳圖片' }}</button>
+                    </div>
+                </div>
+            </div>
+         
+          <div v-if="selectedItem && isEditing && !showCreateForm"  class="result-section edit-mode"  ref="editSectionRef" >
+              <h3>編輯資料：{{ selectedItem.id }}</h3>
+              <div class="form-group">
+                  <label>戶別代碼:</label>
+                  <input v-model="selectedItem.householdCode" />
+                </div>
+              <div class="form-group">
+                  <label>車輛備註:</label>
+                  <textarea ref="notesTextarea" v-model="selectedItem.notes" rows="3"
+            @input="adjustTextareaHeight"></textarea>
+                </div>
+             
+        <hr>
+              <h4>住戶資訊</h4>
+              <div class="form-group">
+                  <label>戶長姓名:</label>
+                  <input v-model="selectedItem.householdInfo.name" />
+                </div>
+              <div class="form-group">
+                  <label>家庭特徵:</label>
+                  <textarea ref="featuresTextarea" v-model="selectedItem.householdInfo.features" rows="4"
+            @input="adjustTextareaHeight"></textarea>
+                </div>
+              <div class="actions">
+                  <button @click="saveAllChanges" :disabled="isLoading" class="save-button">✅ 儲存全部修改</button>
+                  <button @click="cancelEdit" :disabled="isLoading" class="cancel-button">❌ 取消</button>
+                </div>
+           
       </div>
-      <div class="form-group">
-        <label>戶別代碼:</label>
-        <p>{{ selectedItem.householdCode }}</p>
-      </div>
-      <div class="form-group">
-        <label>綜合備註:</label>
-        <div class="combined-notes">
-          <div v-if="selectedItem.householdInfo" class="household-notes">
-            <div class="notes-header">
-              <h4>住戶資訊</h4>
-            </div>
-            <p v-if="selectedItem.householdInfo.name"> {{ selectedItem.householdInfo.name }}</p>
-            <p v-if="selectedItem.householdInfo.features">{{ selectedItem.householdInfo.features }}</p>
-            <p v-if="!selectedItem.householdInfo.name && !selectedItem.householdInfo.features">尚無住戶資訊。</p>
-          </div>
-          <div v-if="selectedItem.notes" class="vehicle-notes">
-            <div class="notes-header">
-              <h4>車輛備註</h4>
-            </div>
-            <p class="notes-display">{{ selectedItem.notes }}</p>
-          </div>
-           <p v-if="!selectedItem.householdInfo && !selectedItem.notes">無任何備註。</p>
+
+          <div v-if="showCreateForm" class="result-section">
+              <h3>新增車牌：{{ plateToCreate }}</h3>
+              <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode"
+            placeholder="請輸入戶別代碼" /></div>
+              <div class="form-group"><label>備註:</label><textarea v-model="selectedItem.notes" rows="3"
+            placeholder="請輸入備註"></textarea></div>
+              <div class="actions"><button @click="handleCreate" :disabled="isLoading" class="save-button">確認新增</button>
         </div>
+            </div>
+
+          <div v-if="message" class="message-section" :class="{ success: isSuccess }">
+              <p>{{ message }}</p>
+            </div>
+
+          <div v-if="isNewHouseholdModalOpen" class="modal-overlay" @click.self="isNewHouseholdModalOpen = false">
+              <div class="modal-content">
+                  <h3>為新戶號建立資料 ({{ householdToCreate.id }})</h3>
+                  <p>此戶號目前没有任何登记车辆，您可以先為它建立住户资讯。</p>
+                  <div class="form-group">
+                      <label>户长姓名:</label>
+                      <input v-model="householdToCreate.name" />
+                    </div>
+                  <div class="form-group">
+                      <label>家庭特徵:</label>
+                      <textarea v-model="householdToCreate.features" rows="4"></textarea>
+                    </div>
+                  <div class="actions">
+                      <button @click="handleHouseholdCreate" :disabled="isLoading" class="save-button">✅ 建立</button>
+                      <button @click="isNewHouseholdModalOpen = false" :disabled="isLoading" class="cancel-button">❌
+              取消</button>
+                    </div>
+                </div>
+            </div>
+    </template>
+
+    <div v-if="searchMode === 'residentList'" class="resident-list-view">
+      <h2>住戶名單總表</h2>
+      <div class="image-wrapper">
+        <img :src="residentListImageUrl" alt="住戶名單總表圖">
       </div>
-      <div class="form-group">
-        <label>相關圖片:</label>
-        <div class="image-preview">
-          <img v-if="selectedItem.imageUrl" :src="selectedItem.imageUrl" alt="車牌圖片"/>
-          <p v-else>尚無圖片</p>
-        </div>
-        <div class="image-upload">
-          <input type="file" @change="handleFileSelect" accept="image/*" />
-          <button @click="handleImageUpload" :disabled="isUploading || !selectedFile">{{ isUploading ? '上傳中...' : '上傳圖片' }}</button>
-        </div>
-      </div>
-    </div>
-    
-    <div 
-      v-if="selectedItem && isEditing && !showCreateForm" 
-      class="result-section edit-mode"
-      ref="editSectionRef"
-    >
-      <h3>編輯資料：{{ selectedItem.id }}</h3>
-      <div class="form-group">
-        <label>戶別代碼:</label>
-        <input v-model="selectedItem.householdCode" />
-      </div>
-      <div class="form-group">
-        <label>車輛備註:</label>
-        <textarea ref="notesTextarea" v-model="selectedItem.notes" rows="3" @input="adjustTextareaHeight"></textarea>
-      </div>
-      <hr>
-      <h4>住戶資訊</h4>
-      <div class="form-group">
-        <label>戶長姓名:</label>
-        <input v-model="selectedItem.householdInfo.name" />
-      </div>
-      <div class="form-group">
-        <label>家庭特徵:</label>
-        <textarea ref="featuresTextarea" v-model="selectedItem.householdInfo.features" rows="4" @input="adjustTextareaHeight"></textarea>
-      </div>
-      <div class="actions">
-        <button @click="saveAllChanges" :disabled="isLoading" class="save-button">✅ 儲存全部修改</button>
-        <button @click="cancelEdit" :disabled="isLoading" class="cancel-button">❌ 取消</button>
-      </div>
+      <p class="image-caption">您可以在行動裝置上用兩指縮放圖片</p>
     </div>
 
-    <div v-if="showCreateForm" class="result-section">
-      <h3>新增車牌：{{ plateToCreate }}</h3>
-      <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" placeholder="請輸入戶別代碼" /></div>
-      <div class="form-group"><label>備註:</label><textarea v-model="selectedItem.notes" rows="3" placeholder="請輸入備註"></textarea></div>
-      <div class="actions"><button @click="handleCreate" :disabled="isLoading" class="save-button">確認新增</button></div>
-    </div>
-
-    <div v-if="message" class="message-section" :class="{ success: isSuccess }">
-      <p>{{ message }}</p>
-    </div>
-
-    <div v-if="isNewHouseholdModalOpen" class="modal-overlay" @click.self="isNewHouseholdModalOpen = false">
-      <div class="modal-content">
-        <h3>為新戶號建立資料 ({{ householdToCreate.id }})</h3>
-        <p>此戶號目前没有任何登记车辆，您可以先為它建立住户资讯。</p>
-        <div class="form-group">
-          <label>户长姓名:</label>
-          <input v-model="householdToCreate.name" />
-        </div>
-        <div class="form-group">
-          <label>家庭特徵:</label>
-          <textarea v-model="householdToCreate.features" rows="4"></textarea>
-        </div>
-        <div class="actions">
-          <button @click="handleHouseholdCreate" :disabled="isLoading" class="save-button">✅ 建立</button>
-          <button @click="isNewHouseholdModalOpen = false" :disabled="isLoading" class="cancel-button">❌ 取消</button>
-        </div>
-      </div>
-    </div>
-
+     
   </div>
 </template>
 
 <style scoped>
-.dashboard { margin-top: 20px; }
-.search-section { display: flex; gap: 10px; align-items: center; }
-.search-section input { flex-grow: 1; }
-.result-section { margin-top: 20px; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
-.form-group { margin-bottom: 15px; }
-.form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
-.actions { margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px; margin-bottom: 0; }
-.save-button { background-color: #28a745; }
-.delete-button { background-color: #dc3545; }
-.message-section { margin-top: 20px; text-align: center; color: #888; }
-.message-section.success p { color: #28a745; font-weight: bold; }
-.results-list ul { list-style: none; padding: 0; margin: 0; }
-.results-list li { padding: 12px 15px; border: 1px solid #ddd; border-radius: 5px; margin-bottom: 5px; cursor: pointer; transition: background-color 0.2s; }
-.results-list li:hover { background-color: #f5f5f5; }
-.results-list li.active { background-color: #007bff; color: white; border-color: #007bff; }
-.image-preview { margin-top: 10px; width: 100%; max-width: 300px; }
-.image-preview img { width: 100%; height: auto; border-radius: 5px; border: 1px solid #eee; }
-.image-upload { margin-top: 10px; }
-.image-upload button { margin-left: 10px; }
-.search-mode-selector { display: flex; justify-content: center; margin-bottom: 15px; background-color: #e9ecef; border-radius: 8px; padding: 5px; }
-.search-mode-selector button { flex: 1; padding: 8px 10px; border: none; background-color: transparent; color: #495057; font-size: 1rem; font-weight: 500; border-radius: 6px; transition: background-color 0.2s, color 0.2s; }
-.search-mode-selector button.active { background-color: white; color: #007bff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-@media (max-width: 480px) { .search-section { flex-direction: column; align-items: stretch; } }
-.toggle-switch-container { flex-shrink: 0; position: relative; height: 34px; display: flex; align-items: center; }
-.toggle-switch-container input[type="checkbox"] { display: none; }
-.switch { position: relative; display: inline-block; width: 90px; height: 34px; background-color: #ccc; border-radius: 34px; transition: background-color 0.2s; cursor: pointer; overflow: hidden; }
-.switch:before { content: ""; position: absolute; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2); pointer-events: none; }
-.toggle-switch-container input[type="checkbox"]:checked + .switch { background-color: #007bff; }
-.toggle-switch-container input[type="checkbox"]:checked + .switch:before { transform: translateX(56px); }
-.text-off, .text-on { position: absolute; color: white; font-size: 14px; font-weight: bold; line-height: 34px; text-align: center; width: 50%; transition: opacity 0.2s; pointer-events: none; }
-.text-off { right: 0; opacity: 1; }
-.text-on { left: 0; opacity: 0; }
-.toggle-switch-container input[type="checkbox"]:checked + .switch .text-off { opacity: 0; }
-.toggle-switch-container input[type="checkbox"]:checked + .switch .text-on { opacity: 1; }
-.list-item-content { font-weight: bold; }
-.clickable-part, .household-part a { color: #007bff; text-decoration: none; cursor: pointer; }
-.household-part { margin-left: 8px; font-weight: normal; color: #6c757d; }
-.household-part a { font-weight: bold; }
+/* --- ADDED STYLES FOR RESIDENT LIST VIEW --- */
+.resident-list-view {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  text-align: center;
+}
+
+.resident-list-view .image-wrapper {
+  margin: 1rem auto;
+  max-width: 900px;
+  /* Adjust max-width as needed */
+  overflow: hidden;
+  /* Helps with zoom on mobile */
+}
+
+.resident-list-view .image-wrapper img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.resident-list-view .image-caption {
+  margin-top: 1rem;
+  color: #6c757d;
+  font-size: 0.9rem;
+}
+
+/* --- EXISTING STYLES --- */
+.dashboard {
+  margin-top: 20px;
+}
+
+.search-section {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.search-section input {
+  flex-grow: 1;
+}
+
+.result-section {
+  margin-top: 20px;
+  padding: 20px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+}
+
+.form-group {
+  margin-bottom: 15px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 5px;
+  font-weight: bold;
+}
+
+.actions {
+  margin-top: 20px;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-bottom: 0;
+}
+
+.save-button {
+  background-color: #28a745;
+}
+
+.delete-button {
+  background-color: #dc3545;
+}
+
+.message-section {
+  margin-top: 20px;
+  text-align: center;
+  color: #888;
+}
+
+.message-section.success p {
+  color: #28a745;
+  font-weight: bold;
+}
+
+.results-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.results-list li {
+  padding: 12px 15px;
+  border: 1px solid #ddd;
+  border-radius: 5px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.results-list li:hover {
+  background-color: #f5f5f5;
+}
+
+.results-list li.active {
+  background-color: #007bff;
+  color: white;
+  border-color: #007bff;
+}
+
+.image-preview {
+  margin-top: 10px;
+  width: 100%;
+  max-width: 300px;
+}
+
+.image-preview img {
+  width: 100%;
+  height: auto;
+  border-radius: 5px;
+  border: 1px solid #eee;
+}
+
+.image-upload {
+  margin-top: 10px;
+}
+
+.image-upload button {
+  margin-left: 10px;
+}
+
+.search-mode-selector {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 15px;
+  background-color: #e9ecef;
+  border-radius: 8px;
+  padding: 5px;
+}
+
+.search-mode-selector button {
+  flex: 1;
+  padding: 8px 10px;
+  border: none;
+  background-color: transparent;
+  color: #495057;
+  font-size: 1rem;
+  font-weight: 500;
+  border-radius: 6px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.search-mode-selector button.active {
+  background-color: white;
+  color: #007bff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+@media (max-width: 480px) {
+  .search-section {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+.toggle-switch-container {
+  flex-shrink: 0;
+  position: relative;
+  height: 34px;
+  display: flex;
+  align-items: center;
+}
+
+.toggle-switch-container input[type="checkbox"] {
+  display: none;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 90px;
+  height: 34px;
+  background-color: #ccc;
+  border-radius: 34px;
+  transition: background-color 0.2s;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.switch:before {
+  content: "";
+  position: absolute;
+  height: 26px;
+  width: 26px;
+  left: 4px;
+  bottom: 4px;
+  background-color: white;
+  border-radius: 50%;
+  transition: transform 0.2s;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2);
+  pointer-events: none;
+}
+
+.toggle-switch-container input[type="checkbox"]:checked+.switch {
+  background-color: #007bff;
+}
+
+.toggle-switch-container input[type="checkbox"]:checked+.switch:before {
+  transform: translateX(56px);
+}
+
+.text-off,
+.text-on {
+  position: absolute;
+  color: white;
+  font-size: 14px;
+  font-weight: bold;
+  line-height: 34px;
+  text-align: center;
+  width: 50%;
+  transition: opacity 0.2s;
+  pointer-events: none;
+}
+
+.text-off {
+  right: 0;
+  opacity: 1;
+}
+
+.text-on {
+  left: 0;
+  opacity: 0;
+}
+
+.toggle-switch-container input[type="checkbox"]:checked+.switch .text-off {
+  opacity: 0;
+}
+
+.toggle-switch-container input[type="checkbox"]:checked+.switch .text-on {
+  opacity: 1;
+}
+
+.list-item-content {
+  font-weight: bold;
+}
+
+.clickable-part,
+.household-part a {
+  color: #007bff;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.household-part {
+  margin-left: 8px;
+  font-weight: normal;
+  color: #6c757d;
+}
+
+.household-part a {
+  font-weight: bold;
+}
+
 .results-list li.active .clickable-part,
 .results-list li.active .household-part,
 .results-list li.active .household-part a {
-  color: white; 
+  color: white;
 }
+
 textarea {
   transition: height 0.1s ease-out;
   resize: none;
   overflow-y: hidden;
 }
+
 .view-mode .form-group p {
   padding: 12px;
   background-color: #f8f9fa;
@@ -504,18 +755,22 @@ textarea {
   margin: 8px 0;
   min-height: 20px;
 }
+
 .view-mode .notes-display {
   white-space: pre-wrap;
   word-break: break-word;
 }
+
 .edit-button {
   background-color: #ffc107;
   font-size: 0.9rem;
   padding: 8px 12px;
 }
+
 .cancel-button {
   background-color: #6c757d;
 }
+
 .combined-notes {
   padding: 12px;
   background-color: #f8f9fa;
@@ -523,6 +778,7 @@ textarea {
   border: 1px solid #dee2e6;
   margin: 8px 0;
 }
+
 .notes-header {
   display: flex;
   justify-content: space-between;
@@ -531,6 +787,7 @@ textarea {
   padding-bottom: 5px;
   margin-bottom: 8px;
 }
+
 .notes-header h4 {
   margin: 0;
   padding: 0;
@@ -539,6 +796,7 @@ textarea {
   color: #6c757d;
   text-align: left;
 }
+
 .inline-edit-button {
   background: none;
   border: none;
@@ -546,11 +804,13 @@ textarea {
   cursor: pointer;
   padding: 0 5px;
 }
+
 .combined-notes p {
   margin: 0 0 5px 0;
   white-space: pre-wrap;
   word-break: break-word;
 }
+
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -563,14 +823,16 @@ textarea {
   align-items: center;
   z-index: 1000;
 }
+
 .modal-content {
   background: white;
   padding: 20px 30px;
   border-radius: 8px;
-  box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+  box-shadow: 0 5px 15px rgba(0, 0, 0, 0.3);
   width: 90%;
   max-width: 500px;
 }
+
 hr {
   border: none;
   border-top: 1px solid #eee;
