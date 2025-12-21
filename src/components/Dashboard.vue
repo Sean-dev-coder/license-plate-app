@@ -263,7 +263,7 @@ const selectItem = async (item) => {
       if (householdDocSnap.exists) {
         completeItemData.householdInfo = householdDocSnap.data()
       } else {
-        completeItemData.householdInfo = { name: '', features: '' } 
+        completeItemData.householdInfo = { name: '', features: '', parking_number: ''} 
       }
     } catch (error) {
       console.error("載入住戶資料失敗:", error); message.value = '載入住戶資料時發生錯誤。'
@@ -298,7 +298,8 @@ const saveAllChanges = async () => {
   
   const householdData = {
     name: selectedItem.value.householdInfo.name || '',
-    features: selectedItem.value.householdInfo.features || ''
+    features: selectedItem.value.householdInfo.features || '',
+    parking_number: selectedItem.value.householdInfo.parking_number || ''
   }
 
   try {
@@ -449,6 +450,10 @@ const handleImageUpload = async () => {
           </div>
         </div>
         <div class="form-group">
+          <label>車位號碼:</label>
+          <p v-if="selectedItem.householdInfo.parking_number">{{ selectedItem.householdInfo.parking_number }}</p>
+        </div>
+        <div class="form-group">
           <label>相關圖片:</label>
           <div class="image-preview">
             <img v-if="selectedItem.imageUrl" :src="selectedItem.imageUrl" alt="車牌圖片"/>
@@ -476,6 +481,10 @@ const handleImageUpload = async () => {
         <div class="form-group">
           <label>戶長姓名:</label>
           <input v-model="selectedItem.householdInfo.name" />
+        </div>
+        <div class="form-group">
+          <label>車位號碼:</label>
+          <input v-model="selectedItem.householdInfo.parking_number" />
         </div>
         <div class="form-group">
           <label>家庭特徵:</label>
