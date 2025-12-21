@@ -5,21 +5,20 @@ import Login from './components/Login.vue'
 import Dashboard from './components/Dashboard.vue'
 
 const isLoggedIn = ref(false)
-const collectionName = ref('licensePlates')
-const householdName = ref('households')
+const collectionName = ref('')
 
 onMounted(() => {
   auth.onAuthStateChanged((user) => {
     if (user) {
+      // 登入成功後，從 localStorage 抓取剛才選定的後綴
+      const suffix = localStorage.getItem('db_suffix') || ''
+      collectionName.value = `licensePlates${suffix}`
+      
+      console.log('App.vue 切換至資料集：', collectionName.value)
       isLoggedIn.value = true
-      if (user.email === 'test@gmail.com') {
-        collectionName.value = 'licensePlates_test'
-      } else {
-        collectionName.value = 'licensePlates_treasure'
-        householdName.value = 'households_treasure'
-      }
     } else {
       isLoggedIn.value = false
+      collectionName.value = ''
     }
   })
 })
@@ -43,7 +42,11 @@ const handleLogout = () => {
     </header>
 
     <main>
-      <Dashboard :collection="collectionName" :household="householdName" />
+      <Dashboard 
+        v-if="collectionName" 
+        :key="collectionName" 
+        :collection="collectionName" 
+      />
     </main>
   </div>
 </template>
@@ -81,7 +84,6 @@ h1, h2, h3, h4 {
   text-align: center;
 }
 
-/* --- App Header 樣式 --- */
 .app-header {
   display: flex;
   justify-content: space-between;
@@ -96,42 +98,29 @@ h1, h2, h3, h4 {
   margin: 0;
   font-size: 1.2rem;
   color: #333;
-  text-align: left; /* 讓標題靠左 */
 }
 
 .logout-button {
   background-color: #6c757d;
-  margin: 0;
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 5px;
 }
 
-/* --- 主要內容區塊樣式 --- */
 main {
   max-width: 800px;
-  margin: 0 auto; /* 水平置中 */
-  padding: 0 20px 20px 20px; /* 左右和下方留白 */
+  margin: 0 auto;
+  padding: 0 20px 20px 20px;
 }
 
-/* 登入頁的卡片樣式 */
 .login-main {
     padding-top: 40px;
 }
-.login-main > div {
-    max-width: 500px;
-    margin: 0 auto;
-    background-color: white;
-    padding: 30px;
-    border-radius: 8px;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-}
 
-/* --- 響應式設計 --- */
 @media (max-width: 600px) {
-  main {
-    padding: 0 15px 15px 15px;
-  }
   .app-header {
     padding: 10px 15px;
-    margin-bottom: 15px;
   }
   .app-title {
     font-size: 1.1rem;

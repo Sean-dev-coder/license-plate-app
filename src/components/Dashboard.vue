@@ -8,9 +8,7 @@ const residentListFile = ref(null)
 const isResidentListUploading = ref(false)
 
 const props = defineProps({
-  collection: { type: String, required: true },
-  household: { type: String, required: true }
-
+  collection: { type: String, required: true }
 })
 
 // --- 狀態變數 ---
@@ -35,20 +33,26 @@ const itemBeforeEdit = ref(null)
 const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 
+// 【關鍵整合：資料選集邏輯】
 const householdCollectionName = computed(() => {
-  return props.household;
+  // 自動偵測車牌集合的後綴，並對應到戶號集合
+  const suffix = props.collection.replace('licensePlates', '');
+  return `households${suffix}`;
 });
-console.log('Using household collection:', householdCollectionName.value);
-// --- 新增：載入住戶名單圖片的函式 ---
+
+// --- 修改：載入住戶名單圖片的函式 ---
 const loadResidentListImage = async () => {
   try {
-    const docRef = db.collection('config').doc('residentList');
+    const suffix = props.collection.replace('licensePlates', '');
+    const configDocName = suffix ? `residentList${suffix}` : 'residentList';
+    
+    const docRef = db.collection('config').doc(configDocName);
     const docSnap = await docRef.get();
     if (docSnap.exists && docSnap.data().imageUrl) {
       residentListImageUrl.value = docSnap.data().imageUrl;
     } else {
       console.log('尚未設定住戶名單圖片');
-      residentListImageUrl.value = 'https://via.placeholder.com/800x600.png?text=請上傳住戶名單圖'; // 預設圖片
+      residentListImageUrl.value = 'https://via.placeholder.com/800x600.png?text=請上傳住戶名單圖'; 
     }
   } catch (error) {
     console.error("讀取住戶名單圖片失敗:", error);
@@ -57,10 +61,10 @@ const loadResidentListImage = async () => {
 
 onMounted(() => {
   loadResidentListImage(); // 頁面載入時，自動讀取圖片
-  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
-// --- 新增：處理住戶名單圖片上傳的相關函式 ---
+// --- 修改：處理住戶名單圖片上傳的相關函式 ---
 const handleResidentListFileSelect = (event) => {
   residentListFile.value = event.target.files[0];
   message.value = `已選擇檔案：${event.target.files[0].name}`;
@@ -77,14 +81,17 @@ const uploadResidentListImage = async () => {
   isSuccess.value = false;
 
   try {
-    // 1. 將圖片上傳到 Firebase Storage 的固定路徑
-    const imagePath = 'system/residentListImage';
+    const suffix = props.collection.replace('licensePlates', '');
+    const configDocName = suffix ? `residentList${suffix}` : 'residentList';
+
+    // 1. 將圖片上傳到 Firebase Storage 的動態路徑
+    const imagePath = `system/residentListImage${suffix}`;
     const imageRef = storage.ref().child(imagePath);
     const uploadTask = await imageRef.put(residentListFile.value);
     const downloadURL = await uploadTask.ref.getDownloadURL();
 
-    // 2. 將新的圖片網址儲存到 Firestore 的固定文件
-    const docRef = db.collection('config').doc('residentList');
+    // 2. 將新的圖片網址儲存到對應的 Config 文件
+    const docRef = db.collection('config').doc(configDocName);
     await docRef.set({ imageUrl: downloadURL }, { merge: true });
 
     // 3. 更新畫面上的圖片
@@ -92,7 +99,7 @@ const uploadResidentListImage = async () => {
     
     message.value = '總表圖片更新成功！';
     isSuccess.value = true;
-    residentListFile.value = null; // 清除已選擇的檔案
+    residentListFile.value = null; 
   } catch (error) {
     console.error("總表圖片上傳失敗:", error);
     message.value = '總表圖片上傳失敗';
@@ -113,288 +120,288 @@ const handleResidentListClick = () => {
 }
 
 const quickSearch = (term, mode = 'plate') => {
-  if (!term) return
-  searchPlate.value = term
-  searchMode.value = mode
-  handleSearch()
+  if (!term) return
+  searchPlate.value = term
+  searchMode.value = mode
+  handleSearch()
 }
 
 const adjustTextareaHeight = () => {
-  nextTick(() => {
-    const textarea = notesTextarea.value;
-    const textareaF = featuresTextarea.value;
+  nextTick(() => {
+    const textarea = notesTextarea.value;
+    const textareaF = featuresTextarea.value;
 
-    if (textarea) {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${textarea.scrollHeight}px`;
-    }
-    if (textareaF) {
-      textareaF.style.height = 'auto';
-      textareaF.style.height = `${textareaF.scrollHeight}px`;
-    }
-  });
+    if (textarea) {
+      textarea.style.height = 'auto';
+      textarea.style.height = `${textarea.scrollHeight}px`;
+    }
+    if (textareaF) {
+      textareaF.style.height = 'auto';
+      textareaF.style.height = `${textareaF.scrollHeight}px`;
+    }
+  });
 }
 
 watch(selectedItem, (newItem) => {
-  if (newItem && isEditing.value) {
-    adjustTextareaHeight()
-  }
+  if (newItem && isEditing.value) {
+    adjustTextareaHeight()
+  }
 })
 
 const enterEditMode = () => {
-  itemBeforeEdit.value = JSON.parse(JSON.stringify(selectedItem.value))
-  isEditing.value = true
-  nextTick(() => {
-    adjustTextareaHeight()
-  })
+  itemBeforeEdit.value = JSON.parse(JSON.stringify(selectedItem.value))
+  isEditing.value = true
+  nextTick(() => {
+    adjustTextareaHeight()
+  })
 }
 
 const cancelEdit = () => {
-  selectedItem.value = { ...itemBeforeEdit.value }
-  isEditing.value = false
+  selectedItem.value = { ...itemBeforeEdit.value }
+  isEditing.value = false
 }
 
 const handleHouseholdCreate = async () => {
-  if (!householdToCreate.value.id) { alert('户号不能为空！'); return }
-  isLoading.value = true
-  try {
-    const docRef = db.collection(householdCollectionName.value).doc(householdToCreate.value.id)
-    const dataToCreate = {
-      name: householdToCreate.value.name || '',
-      features: householdToCreate.value.features || ''
-    }
-    await docRef.set(dataToCreate)
-    message.value = `户号「${householdToCreate.value.id}」的住户资讯已成功建立！`
-    isSuccess.value = true
-    isNewHouseholdModalOpen.value = false
-  } catch (error) {
-    console.error("建立住户失败:", error)
-    message.value = '建立住户失败'
-    isSuccess.value = false
-  } finally {
-    isLoading.value = false
-  }
+  if (!householdToCreate.value.id) { alert('户号不能为空！'); return }
+  isLoading.value = true
+  try {
+    const docRef = db.collection(householdCollectionName.value).doc(householdToCreate.value.id)
+    const dataToCreate = {
+      name: householdToCreate.value.name || '',
+      features: householdToCreate.value.features || ''
+    }
+    await docRef.set(dataToCreate)
+    message.value = `户号「${householdToCreate.value.id}」的住户资讯已成功建立！`
+    isSuccess.value = true
+    isNewHouseholdModalOpen.value = false
+  } catch (error) {
+    console.error("建立住户失败:", error)
+    message.value = '建立住户失败'
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+  }
 }
 
 const changeSearchMode = (mode) => {
-  searchMode.value = mode
+  searchMode.value = mode
   message.value = ''; // 切換分頁時清除訊息
-  if (mode === 'household') { isNumericMode.value = false } 
-  else { isNumericMode.value = true }
-  if (mode !== 'residentList') {
+  if (mode === 'household') { isNumericMode.value = false } 
+  else { isNumericMode.value = true }
+  if (mode !== 'residentList') {
     nextTick(() => { if (searchInput.value) searchInput.value.focus() })
   }
 }
 
 const toggleInputMode = () => {
-  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+  nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 }
 
 const handleSearch = async () => {
-  if (!searchPlate.value) { alert('請輸入查詢內容！'); return }
-  const searchInputString = searchPlate.value.toUpperCase().trim()
-  searchPlate.value = ''
-  isLoading.value = true
-  searchResults.value = []
-  selectedItem.value = null
-  message.value = ''
-  showCreateForm.value = false
-  try {
-    let querySnapshot;
-    if (searchMode.value === 'household') {
-      querySnapshot = await db.collection(props.collection).where('householdCode', '==', searchInputString).get()
-      if (querySnapshot.empty) {
-        message.value = `查无户号为「${searchInputString}」的车辆，您可以為此戶號建立住户資料。`
-        householdToCreate.value = { id: searchInputString, name: '', features: '' }
-        isNewHouseholdModalOpen.value = true
-      }
-    } else {
-      if (searchInputString.includes('-')) {
-        const docRef = db.collection(props.collection).doc(searchInputString)
-        const docSnap = await docRef.get()
-        if (docSnap.exists) {
-          const result = { id: docSnap.id, ...docSnap.data() }; searchResults.value = [result]; selectItem(result)
-        } else {
-          message.value = `查無車牌「${searchInputString}」，您可以新增此筆資料。`; isSuccess.value = false; showCreateForm.value = true; plateToCreate.value = searchInputString; selectedItem.value = { householdCode: '', notes: '' }
-        }
-        isLoading.value = false
-        return
-      } else {
-        const searchTerms = searchInputString.split(' ').filter(term => term.length > 0)
-        if (searchTerms.length > 10) { alert('批次查詢最多10個關鍵字。'); isLoading.value = false; return }
-        querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
-      }
-    }
-    if (querySnapshot && !querySnapshot.empty) {
-      searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-    } else {
-      if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
-         message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
-      }
-    }
-  } catch (error) {
-    console.error("查詢失敗:", error)
-    message.value = '查詢時發生錯誤，請稍後再試。'
-    isSuccess.value = false
-  } finally {
-    isLoading.value = false
-    if (searchMode.value !== 'residentList') {
-      nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+  if (!searchPlate.value) { alert('請輸入查詢內容！'); return }
+  const searchInputString = searchPlate.value.toUpperCase().trim()
+  searchPlate.value = ''
+  isLoading.value = true
+  searchResults.value = []
+  selectedItem.value = null
+  message.value = ''
+  showCreateForm.value = false
+  try {
+    let querySnapshot;
+    if (searchMode.value === 'household') {
+      querySnapshot = await db.collection(props.collection).where('householdCode', '==', searchInputString).get()
+      if (querySnapshot.empty) {
+        message.value = `查无户号为「${searchInputString}」的车辆，您可以為此戶號建立住户資料。`
+        householdToCreate.value = { id: searchInputString, name: '', features: '' }
+        isNewHouseholdModalOpen.value = true
+      }
+    } else {
+      if (searchInputString.includes('-')) {
+        const docRef = db.collection(props.collection).doc(searchInputString)
+        const docSnap = await docRef.get()
+        if (docSnap.exists) {
+          const result = { id: docSnap.id, ...docSnap.data() }; searchResults.value = [result]; selectItem(result)
+        } else {
+          message.value = `查無車牌「${searchInputString}」，您可以新增此筆資料。`; isSuccess.value = false; showCreateForm.value = true; plateToCreate.value = searchInputString; selectedItem.value = { householdCode: '', notes: '' }
+        }
+        isLoading.value = false
+        return
+      } else {
+        const searchTerms = searchInputString.split(' ').filter(term => term.length > 0)
+        if (searchTerms.length > 10) { alert('批次查詢最多10個關鍵字。'); isLoading.value = false; return }
+        querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
+      }
     }
-  }
+    if (querySnapshot && !querySnapshot.empty) {
+      searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+    } else {
+      if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
+          message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
+      }
+    }
+  } catch (error) {
+    console.error("查詢失敗:", error)
+    message.value = '查詢時發生錯誤，請稍後再試。'
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+    if (searchMode.value !== 'residentList') {
+      nextTick(() => { if (searchInput.value) searchInput.value.focus() })
+    }
+  }
 }
 
 const selectItem = async (item) => {
-  message.value = '正在載入詳細資料...'
-  isSuccess.value = false
-  isLoading.value = true
-  let completeItemData = { ...item }
-  if (item.householdCode) {
-    try {
-      const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode)
-      const householdDocSnap = await householdDocRef.get()
-      if (householdDocSnap.exists) {
-        completeItemData.householdInfo = householdDocSnap.data()
-      } else {
-        completeItemData.householdInfo = { name: '', features: '' } 
-      }
-    } catch (error) {
-      console.error("載入住戶資料失敗:", error); message.value = '載入住戶資料時發生錯誤。'
-    }
-  }
-  selectedItem.value = completeItemData
-  isEditing.value = false
-  selectedFile.value = null
-  showCreateForm.value = false
-  message.value = ''
-  isLoading.value = false
-  nextTick(() => {
-    if (editSectionRef.value) {
-      editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  })
+  message.value = '正在載入詳細資料...'
+  isSuccess.value = false
+  isLoading.value = true
+  let completeItemData = { ...item }
+  if (item.householdCode) {
+    try {
+      const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode)
+      const householdDocSnap = await householdDocRef.get()
+      if (householdDocSnap.exists) {
+        completeItemData.householdInfo = householdDocSnap.data()
+      } else {
+        completeItemData.householdInfo = { name: '', features: '' } 
+      }
+    } catch (error) {
+      console.error("載入住戶資料失敗:", error); message.value = '載入住戶資料時發生錯誤。'
+    }
+  }
+  selectedItem.value = completeItemData
+  isEditing.value = false
+  selectedFile.value = null
+  showCreateForm.value = false
+  message.value = ''
+  isLoading.value = false
+  nextTick(() => {
+    if (editSectionRef.value) {
+      editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  })
 }
 
 const saveAllChanges = async () => {
-  if (!selectedItem.value || !selectedItem.value.id) return
-  isLoading.value = true
-  
-  const plateDocRef = db.collection(props.collection).doc(selectedItem.value.id)
-  const householdDocRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode)
+  if (!selectedItem.value || !selectedItem.value.id) return
+  isLoading.value = true
+  
+  const plateDocRef = db.collection(props.collection).doc(selectedItem.value.id)
+  const householdDocRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode)
 
-  const plateData = {
-    householdCode: selectedItem.value.householdCode,
-    notes: selectedItem.value.notes,
-    lastUpdatedBy: auth.currentUser.email,
-    updatedAt: new Date()
-  }
-  
-  const householdData = {
-    name: selectedItem.value.householdInfo.name || '',
-    features: selectedItem.value.householdInfo.features || ''
-  }
+  const plateData = {
+    householdCode: selectedItem.value.householdCode,
+    notes: selectedItem.value.notes,
+    lastUpdatedBy: auth.currentUser.email,
+    updatedAt: new Date()
+  }
+  
+  const householdData = {
+    name: selectedItem.value.householdInfo.name || '',
+    features: selectedItem.value.householdInfo.features || ''
+  }
 
-  try {
-    await Promise.all([
-      plateDocRef.update(plateData),
-      householdDocRef.set(householdData, { merge: true })
-    ])
-    
-    message.value = '所有資料更新成功！'
-    isSuccess.value = true
-    
-    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
-    if (index !== -1) { 
-      searchResults.value[index] = { ...selectedItem.value }
-    }
-    isEditing.value = false
-    
-  } catch (error) {
-    console.error("儲存失敗:", error)
-    message.value = '儲存失敗，請稍後再試。'
-    isSuccess.value = false
-  } finally {
-    isLoading.value = false
-  }
+  try {
+    await Promise.all([
+      plateDocRef.update(plateData),
+      householdDocRef.set(householdData, { merge: true })
+    ])
+    
+    message.value = '所有資料更新成功！'
+    isSuccess.value = true
+    
+    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
+    if (index !== -1) { 
+      searchResults.value[index] = { ...selectedItem.value }
+    }
+    isEditing.value = false
+    
+  } catch (error) {
+    console.error("儲存失敗:", error)
+    message.value = '儲存失敗，請稍後再試。'
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+  }
 }
 
 const handleCreate = async () => {
-   if (!plateToCreate.value) return
-  isLoading.value = true
-  try {
-    const docRef = db.collection(props.collection).doc(plateToCreate.value)
-    const keywords = plateToCreate.value.toUpperCase().split('-').filter(Boolean)
-    const dataToCreate = { householdCode: selectedItem.value.householdCode, notes: selectedItem.value.notes, createdBy: auth.currentUser.email, createdAt: new Date(), searchKeywords: keywords, imageUrl: '' }
-    await docRef.set(dataToCreate)
-    message.value = `車牌「${plateToCreate.value}」已成功新增！`; isSuccess.value = true
-    showCreateForm.value = false; selectedItem.value = null; searchPlate.value = plateToCreate.value
-  } catch (error) { console.error("新增失敗:", error); message.value = '新增失敗'; isSuccess.value = false }
-  finally { isLoading.value = false }
+   if (!plateToCreate.value) return
+  isLoading.value = true
+  try {
+    const docRef = db.collection(props.collection).doc(plateToCreate.value)
+    const keywords = plateToCreate.value.toUpperCase().split('-').filter(Boolean)
+    const dataToCreate = { householdCode: selectedItem.value.householdCode, notes: selectedItem.value.notes, createdBy: auth.currentUser.email, createdAt: new Date(), searchKeywords: keywords, imageUrl: '' }
+    await docRef.set(dataToCreate)
+    message.value = `車牌「${plateToCreate.value}」已成功新增！`; isSuccess.value = true
+    showCreateForm.value = false; selectedItem.value = null; searchPlate.value = plateToCreate.value
+  } catch (error) { console.error("新增失敗:", error); message.value = '新增失敗'; isSuccess.value = false }
+  finally { isLoading.value = false }
 }
 
 const handleDelete = async () => {
-  if (!selectedItem.value || !selectedItem.value.id) return
-  if (!window.confirm(`確定要永久刪除車牌「${selectedItem.value.id}」的資料嗎？`)) { return }
-  isLoading.value = true
-  try {
-    if (selectedItem.value.imageUrl) {
-      const imageRef = storage.refFromURL(selectedItem.value.imageUrl); await imageRef.delete()
-    }
-    await db.collection(props.collection).doc(selectedItem.value.id).delete()
-    message.value = '資料已成功刪除。'; isSuccess.value = true
-    searchResults.value = searchResults.value.filter(item => item.id !== selectedItem.value.id)
-    selectedItem.value = null
-  } catch (error) { console.error("刪除失敗:", error); message.value = '刪除失敗'; isSuccess.value = false }
-  finally { isLoading.value = false }
+  if (!selectedItem.value || !selectedItem.value.id) return
+  if (!window.confirm(`確定要永久刪除車牌「${selectedItem.value.id}」的資料嗎？`)) { return }
+  isLoading.value = true
+  try {
+    if (selectedItem.value.imageUrl) {
+      const imageRef = storage.refFromURL(selectedItem.value.imageUrl); await imageRef.delete()
+    }
+    await db.collection(props.collection).doc(selectedItem.value.id).delete()
+    message.value = '資料已成功刪除。'; isSuccess.value = true
+    searchResults.value = searchResults.value.filter(item => item.id !== selectedItem.value.id)
+    selectedItem.value = null
+  } catch (error) { console.error("刪除失敗:", error); message.value = '刪除失敗'; isSuccess.value = false }
+  finally { isLoading.value = false }
 }
 
 const handleFileSelect = (event) => {
-  selectedFile.value = event.target.files[0]
+  selectedFile.value = event.target.files[0]
 }
 
 const handleImageUpload = async () => {
-  if (!selectedFile.value) { alert('請先選擇圖片檔案！'); return }
-  if (!selectedItem.value || !selectedItem.value.id) { alert('請先選擇資料項目'); return }
-  isUploading.value = true; message.value = '圖片上傳中...'; isSuccess.value = false
-  try {
-    const imagePath = `plates/${props.collection}/${selectedItem.value.id}`
-    const imageRef = storage.ref().child(imagePath)
-    const uploadTask = await imageRef.put(selectedFile.value)
-    const downloadURL = await uploadTask.ref.getDownloadURL()
-    const docRef = db.collection(props.collection).doc(selectedItem.value.id)
-    await docRef.update({ imageUrl: downloadURL })
-    selectedItem.value.imageUrl = downloadURL
-    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
-    if (index !== -1) { searchResults.value[index].imageUrl = downloadURL }
-    message.value = '圖片上傳成功！'; isSuccess.value = true; selectedFile.value = null
-  } catch (error) { console.error("圖片上傳失敗:", error); message.value = '圖片上傳失敗'; isSuccess.value = false }
-  finally { isUploading.value = false }
+  if (!selectedFile.value) { alert('請先選擇圖片檔案！'); return }
+  if (!selectedItem.value || !selectedItem.value.id) { alert('請先選擇資料項目'); return }
+  isUploading.value = true; message.value = '圖片上傳中...'; isSuccess.value = false
+  try {
+    const imagePath = `plates/${props.collection}/${selectedItem.value.id}`
+    const imageRef = storage.ref().child(imagePath)
+    const uploadTask = await imageRef.put(selectedFile.value)
+    const downloadURL = await uploadTask.ref.getDownloadURL()
+    const docRef = db.collection(props.collection).doc(selectedItem.value.id)
+    await docRef.update({ imageUrl: downloadURL })
+    selectedItem.value.imageUrl = downloadURL
+    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
+    if (index !== -1) { searchResults.value[index].imageUrl = downloadURL }
+    message.value = '圖片上傳成功！'; isSuccess.value = true; selectedFile.value = null
+  } catch (error) { console.error("圖片上傳失敗:", error); message.value = '圖片上傳失敗'; isSuccess.value = false }
+  finally { isUploading.value = false }
 }
 </script>
 
 <template>
-  <div class="dashboard">
-    <div class="search-mode-selector">
-      <button :class="{ active: searchMode === 'plate' }" @click="changeSearchMode('plate')">查車牌</button>
-      <button :class="{ active: searchMode === 'household' }" @click="changeSearchMode('household')">查戶號</button>
-      <button :class="{ active: searchMode === 'residentList' }" @click="changeSearchMode('residentList')">住戶名單</button>
-    </div>
+  <div class="dashboard">
+    <div class="search-mode-selector">
+      <button :class="{ active: searchMode === 'plate' }" @click="changeSearchMode('plate')">查車牌</button>
+      <button :class="{ active: searchMode === 'household' }" @click="changeSearchMode('household')">查戶號</button>
+      <button :class="{ active: searchMode === 'residentList' }" @click="changeSearchMode('residentList')">住戶名單</button>
+    </div>
 
     <template v-if="searchMode !== 'residentList'">
-            <div class="search-section">
-        <input ref="searchInput" v-model="searchPlate" @keyup.enter="handleSearch" :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢或新增' : '請輸入戶號查詢'" :inputmode="isNumericMode ? 'numeric' : 'text'" />
-        <div v-if="searchMode === 'plate'" class="toggle-switch-container">
-          <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
-          <label for="inputModeToggle" class="switch">
-            <span class="text-off">英文</span>
-            <span class="text-on">數字</span>
-          </label>
-        </div>
-        <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
-      </div>
+            <div class="search-section">
+        <input ref="searchInput" v-model="searchPlate" @keyup.enter="handleSearch" :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢或新增' : '請輸入戶號查詢'" :inputmode="isNumericMode ? 'numeric' : 'text'" />
+        <div v-if="searchMode === 'plate'" class="toggle-switch-container">
+          <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
+          <label for="inputModeToggle" class="switch">
+            <span class="text-off">英文</span>
+            <span class="text-on">數字</span>
+          </label>
+        </div>
+        <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
+      </div>
 
-      <div v-if="searchResults.length > 0" class="results-list">
-        <h4>找到了 {{ searchResults.length }} 筆結果：</h4>
+      <div v-if="searchResults.length > 0" class="results-list">
+        <h4>找到了 {{ searchResults.length }} 筆結果：</h4>
       <ul>
         <li v-for="item in searchResults" :key="item.id" @click="selectItem(item)" :class="{ active: selectedItem && selectedItem.id === item.id }">
           <div class="list-item-content">
@@ -408,107 +415,107 @@ const handleImageUpload = async () => {
           </div>
         </li>
       </ul>
-        <hr>
-      </div>
+        <hr>
+      </div>
 
-      <div v-if="selectedItem && !isEditing && !showCreateForm" class="result-section view-mode" ref="editSectionRef">
-        <h3>資料詳情：{{ selectedItem.id }}</h3>
-        <div class="actions">
-          <button @click="enterEditMode" class="edit-button">✏️ 編輯</button>
-          <button @click="handleDelete" :disabled="isLoading" class="delete-button">🗑️ 刪除</button>
-        </div>
-        <div class="form-group">
-          <label>戶別代碼:</label>
-          <p>{{ selectedItem.householdCode }}</p>
-        </div>
-        <div class="form-group">
-          <label>綜合備註:</label>
-          <div class="combined-notes">
-            <div v-if="selectedItem.householdInfo" class="household-notes">
-              <div class="notes-header">
-                <h4>住戶資訊</h4>
-              </div>
-              <p v-if="selectedItem.householdInfo.name"> {{ selectedItem.householdInfo.name }}</p>
-              <p v-if="selectedItem.householdInfo.features">{{ selectedItem.householdInfo.features }}</p>
-              <p v-if="!selectedItem.householdInfo.name && !selectedItem.householdInfo.features">尚無住戶資訊。</p>
-            </div>
-            <div v-if="selectedItem.notes" class="vehicle-notes">
-              <div class="notes-header">
-                <h4>車輛備註</h4>
-              </div>
-              <p class="notes-display">{{ selectedItem.notes }}</p>
-            </div>
-             <p v-if="!selectedItem.householdInfo && !selectedItem.notes">無任何備註。</p>
-          </div>
-        </div>
-        <div class="form-group">
-          <label>相關圖片:</label>
-          <div class="image-preview">
-            <img v-if="selectedItem.imageUrl" :src="selectedItem.imageUrl" alt="車牌圖片"/>
-            <p v-else>尚無圖片</p>
-          </div>
-          <div class="image-upload">
-            <input type="file" @change="handleFileSelect" accept="image/*" />
-            <button @click="handleImageUpload" :disabled="isUploading || !selectedFile">{{ isUploading ? '上傳中...' : '上傳圖片' }}</button>
-          </div>
-        </div>
-      </div>
-    
-      <div v-if="selectedItem && isEditing && !showCreateForm" class="result-section edit-mode" ref="editSectionRef">
-        <h3>編輯資料：{{ selectedItem.id }}</h3>
-        <div class="form-group">
-          <label>戶別代碼:</label>
-          <input v-model="selectedItem.householdCode" />
-        </div>
-        <div class="form-group">
-          <label>車輛備註:</label>
-          <textarea ref="notesTextarea" v-model="selectedItem.notes" rows="3" @input="adjustTextareaHeight"></textarea>
-        </div>
-        <hr>
-        <h4>住戶資訊</h4>
-        <div class="form-group">
-          <label>戶長姓名:</label>
-          <input v-model="selectedItem.householdInfo.name" />
-        </div>
-        <div class="form-group">
-          <label>家庭特徵:</label>
-          <textarea ref="featuresTextarea" v-model="selectedItem.householdInfo.features" rows="4" @input="adjustTextareaHeight"></textarea>
-        </div>
-        <div class="actions">
-          <button @click="saveAllChanges" :disabled="isLoading" class="save-button">✅ 儲存全部修改</button>
-          <button @click="cancelEdit" :disabled="isLoading" class="cancel-button">❌ 取消</button>
-        </div>
-      </div>
+      <div v-if="selectedItem && !isEditing && !showCreateForm" class="result-section view-mode" ref="editSectionRef">
+        <h3>資料詳情：{{ selectedItem.id }}</h3>
+        <div class="actions">
+          <button @click="enterEditMode" class="edit-button">✏️ 編輯</button>
+          <button @click="handleDelete" :disabled="isLoading" class="delete-button">🗑️ 刪除</button>
+        </div>
+        <div class="form-group">
+          <label>戶別代碼:</label>
+          <p>{{ selectedItem.householdCode }}</p>
+        </div>
+        <div class="form-group">
+          <label>綜合備註:</label>
+          <div class="combined-notes">
+            <div v-if="selectedItem.householdInfo" class="household-notes">
+              <div class="notes-header">
+                <h4>住戶資訊</h4>
+              </div>
+              <p v-if="selectedItem.householdInfo.name"> {{ selectedItem.householdInfo.name }}</p>
+              <p v-if="selectedItem.householdInfo.features">{{ selectedItem.householdInfo.features }}</p>
+              <p v-if="!selectedItem.householdInfo.name && !selectedItem.householdInfo.features">尚無住戶資訊。</p>
+            </div>
+            <div v-if="selectedItem.notes" class="vehicle-notes">
+              <div class="notes-header">
+                <h4>車輛備註</h4>
+              </div>
+              <p class="notes-display">{{ selectedItem.notes }}</p>
+            </div>
+             <p v-if="!selectedItem.householdInfo && !selectedItem.notes">無任何備註。</p>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>相關圖片:</label>
+          <div class="image-preview">
+            <img v-if="selectedItem.imageUrl" :src="selectedItem.imageUrl" alt="車牌圖片"/>
+            <p v-else>尚無圖片</p>
+          </div>
+          <div class="image-upload">
+            <input type="file" @change="handleFileSelect" accept="image/*" />
+            <button @click="handleImageUpload" :disabled="isUploading || !selectedFile">{{ isUploading ? '上傳中...' : '上傳圖片' }}</button>
+          </div>
+        </div>
+      </div>
+    
+      <div v-if="selectedItem && isEditing && !showCreateForm" class="result-section edit-mode" ref="editSectionRef">
+        <h3>編輯資料：{{ selectedItem.id }}</h3>
+        <div class="form-group">
+          <label>戶別代碼:</label>
+          <input v-model="selectedItem.householdCode" />
+        </div>
+        <div class="form-group">
+          <label>車輛備註:</label>
+          <textarea ref="notesTextarea" v-model="selectedItem.notes" rows="3" @input="adjustTextareaHeight"></textarea>
+        </div>
+        <hr>
+        <h4>住戶資訊</h4>
+        <div class="form-group">
+          <label>戶長姓名:</label>
+          <input v-model="selectedItem.householdInfo.name" />
+        </div>
+        <div class="form-group">
+          <label>家庭特徵:</label>
+          <textarea ref="featuresTextarea" v-model="selectedItem.householdInfo.features" rows="4" @input="adjustTextareaHeight"></textarea>
+        </div>
+        <div class="actions">
+          <button @click="saveAllChanges" :disabled="isLoading" class="save-button">✅ 儲存全部修改</button>
+          <button @click="cancelEdit" :disabled="isLoading" class="cancel-button">❌ 取消</button>
+        </div>
+      </div>
 
-      <div v-if="showCreateForm" class="result-section">
-        <h3>新增車牌：{{ plateToCreate }}</h3>
-        <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" placeholder="請輸入戶別代碼" /></div>
-        <div class="form-group"><label>備註:</label><textarea v-model="selectedItem.notes" rows="3" placeholder="請輸入備註"></textarea></div>
-        <div class="actions"><button @click="handleCreate" :disabled="isLoading" class="save-button">確認新增</button></div>
-      </div>
+      <div v-if="showCreateForm" class="result-section">
+        <h3>新增車牌：{{ plateToCreate }}</h3>
+        <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" placeholder="請輸入戶別代碼" /></div>
+        <div class="form-group"><label>備註:</label><textarea v-model="selectedItem.notes" rows="3" placeholder="請輸入備註"></textarea></div>
+        <div class="actions"><button @click="handleCreate" :disabled="isLoading" class="save-button">確認新增</button></div>
+      </div>
 
-      <div v-if="message" class="message-section" :class="{ success: isSuccess }">
-        <p>{{ message }}</p>
-      </div>
+      <div v-if="message" class="message-section" :class="{ success: isSuccess }">
+        <p>{{ message }}</p>
+      </div>
 
-      <div v-if="isNewHouseholdModalOpen" class="modal-overlay" @click.self="isNewHouseholdModalOpen = false">
-        <div class="modal-content">
-          <h3>為新戶號建立資料 ({{ householdToCreate.id }})</h3>
-          <p>此戶號目前没有任何登记车辆，您可以先為它建立住户资讯。</p>
-          <div class="form-group">
-            <label>户长姓名:</label>
-            <input v-model="householdToCreate.name" />
-          </div>
-          <div class="form-group">
-            <label>家庭特徵:</label>
-            <textarea v-model="householdToCreate.features" rows="4"></textarea>
-          </div>
-          <div class="actions">
-            <button @click="handleHouseholdCreate" :disabled="isLoading" class="save-button">✅ 建立</button>
-            <button @click="isNewHouseholdModalOpen = false" :disabled="isLoading" class="cancel-button">❌ 取消</button>
-          </div>
-        </div>
-      </div>
+      <div v-if="isNewHouseholdModalOpen" class="modal-overlay" @click.self="isNewHouseholdModalOpen = false">
+        <div class="modal-content">
+          <h3>為新戶號建立資料 ({{ householdToCreate.id }})</h3>
+          <p>此戶號目前没有任何登记车辆，您可以先為它建立住户资讯。</p>
+          <div class="form-group">
+            <label>户长姓名:</label>
+            <input v-model="householdToCreate.name" />
+          </div>
+          <div class="form-group">
+            <label>家庭特徵:</label>
+            <textarea v-model="householdToCreate.features" rows="4"></textarea>
+          </div>
+          <div class="actions">
+            <button @click="handleHouseholdCreate" :disabled="isLoading" class="save-button">✅ 建立</button>
+            <button @click="isNewHouseholdModalOpen = false" :disabled="isLoading" class="cancel-button">❌ 取消</button>
+          </div>
+        </div>
+      </div>
     </template>
 
     <div v-if="searchMode === 'residentList'" class="resident-list-view">
@@ -530,11 +537,11 @@ const handleImageUpload = async () => {
        </p>
     </div>
 
-  </div>
+  </div>
 </template>
 
 <style scoped>
-/* --- 新增的樣式 --- */
+/* --- 樣式完全保持原樣 --- */
 .resident-list-view {
   margin-top: 20px;
   padding: 20px;
@@ -572,7 +579,6 @@ const handleImageUpload = async () => {
   color: #007bff;
 }
 
-/* --- 原有的樣式 --- */
 .dashboard { margin-top: 20px; }
 .search-section { display: flex; gap: 10px; align-items: center; }
 .search-section input { flex-grow: 1; }
@@ -608,7 +614,6 @@ const handleImageUpload = async () => {
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-off { opacity: 0; }
 .toggle-switch-container input[type="checkbox"]:checked + .switch .text-on { opacity: 1; }
 
-/* --- 最終排版修正 --- */
 .list-item-content {
   display: flex;
   justify-content: space-between;
