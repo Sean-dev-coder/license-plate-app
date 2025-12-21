@@ -580,8 +580,30 @@ const handleImageUpload = async () => {
 }
 
 .dashboard { margin-top: 20px; }
-.search-section { display: flex; gap: 10px; align-items: center; }
-.search-section input { flex-grow: 1; }
+.search-section { display: flex;
+  flex-direction: column; /* 改成直向 */
+  gap: 15px;              /* 增加間距 */
+  align-items: stretch;   /* 拉伸寬度 */
+  margin-bottom: 20px; }
+.search-section > input:not([type="checkbox"]) {
+  flex-grow: 1;
+  height: 60px;        /* 加高 */
+  font-size: 20px;     /* 字體加大 */
+  padding: 10px 15px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+}
+/* 這是新增的，原本可能沒有獨立寫出來 */
+.search-section > button {
+  height: 60px;        /* 跟輸入框一樣高 */
+  font-size: 22px;     /* 字體加大 */
+  font-weight: bold;
+  border-radius: 8px;
+  background-color: #007bff; /* 確保顏色明顯 */
+  color: white;
+  border: none;
+  cursor: pointer;
+}
 .result-section { margin-top: 20px; padding: 20px; border: 1px solid #eee; border-radius: 8px; }
 .form-group { margin-bottom: 15px; }
 .form-group label { display: block; margin-bottom: 5px; font-weight: bold; }
@@ -602,7 +624,14 @@ const handleImageUpload = async () => {
 .search-mode-selector button { flex: 1; padding: 8px 10px; border: none; background-color: transparent; color: #495057; font-size: 1rem; font-weight: 500; border-radius: 6px; transition: background-color 0.2s, color 0.2s; }
 .search-mode-selector button.active { background-color: white; color: #007bff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
 @media (max-width: 480px) { .search-section { flex-direction: column; align-items: stretch; } }
-.toggle-switch-container { flex-shrink: 0; position: relative; height: 34px; display: flex; align-items: center; }
+.toggle-switch-container {
+  flex-shrink: 0;
+  position: relative;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  margin: 5px 0;      /* 增加一點上下空間 */
+}
 .toggle-switch-container input[type="checkbox"] { display: none; }
 .switch { position: relative; display: inline-block; width: 90px; height: 34px; background-color: #ccc; border-radius: 34px; transition: background-color 0.2s; cursor: pointer; overflow: hidden; }
 .switch:before { content: ""; position: absolute; height: 26px; width: 26px; left: 4px; bottom: 4px; background-color: white; border-radius: 50%; transition: transform 0.2s; box-shadow: 0 2px 5px rgba(0, 0, 0, 0.2); pointer-events: none; }
