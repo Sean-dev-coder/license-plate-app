@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard.vue'
 
 const isLoggedIn = ref(false)
 const collectionName = ref('licensePlates')
+const householdName = ref('households')
 
 onMounted(() => {
   auth.onAuthStateChanged((user) => {
@@ -14,7 +15,8 @@ onMounted(() => {
       if (user.email === 'test@gmail.com') {
         collectionName.value = 'licensePlates_test'
       } else {
-        collectionName.value = 'licensePlates'
+        collectionName.value = 'licensePlates_treasure'
+        householdName.value = 'households_treasure'
       }
     } else {
       isLoggedIn.value = false
@@ -41,7 +43,7 @@ const handleLogout = () => {
     </header>
 
     <main>
-      <Dashboard :collection="collectionName" />
+      <Dashboard :collection="collectionName" :household="householdName" />
     </main>
   </div>
 </template>

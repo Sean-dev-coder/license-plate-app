@@ -8,7 +8,9 @@ const residentListFile = ref(null)
 const isResidentListUploading = ref(false)
 
 const props = defineProps({
-  collection: { type: String, required: true }
+  collection: { type: String, required: true },
+  household: { type: String, required: true }
+
 })
 
 // --- 狀態變數 ---
@@ -34,11 +36,9 @@ const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 
 const householdCollectionName = computed(() => {
-  return props.collection === 'licensePlates_test' 
-    ? 'households_test' 
-    : 'households';
+  return props.household;
 });
-
+console.log('Using household collection:', householdCollectionName.value);
 // --- 新增：載入住戶名單圖片的函式 ---
 const loadResidentListImage = async () => {
   try {
