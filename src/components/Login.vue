@@ -149,7 +149,6 @@ select.custom-input {
 .login-btn {
   width: 100%;
   height: 50px;
-  background-color: #42b983;
   color: white;
   border: none;
   border-radius: 8px;
@@ -157,10 +156,6 @@ select.custom-input {
   font-weight: 600;
   cursor: pointer;
   transition: background 0.3s;
-}
-
-.login-btn:hover {
-  background-color: #3aa876;
 }
 
 .error-msg {
