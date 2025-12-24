@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard.vue'
 
 const isLoggedIn = ref(false)
 const collectionName = ref('')
+const communityDisplayName = ref('') // 新增：用於顯示中文名稱
 
 onMounted(() => {
   auth.onAuthStateChanged((user) => {
@@ -13,7 +14,15 @@ onMounted(() => {
       // 登入成功後，從 localStorage 抓取剛才選定的後綴
       const suffix = localStorage.getItem('db_suffix') || ''
       collectionName.value = `licensePlates${suffix}`
-      
+      // 📍 新增：中文化對照表
+      const communityMap = {
+        '_test': '測試區域',
+        '': '大陸丽格',
+        '_epoque': '大陸豐蒔',
+        '_treasure': '大陸宝格'
+      }
+      // 根據後綴抓取中文名，如果找不到就顯示原始 ID
+      communityDisplayName.value = communityMap[suffix] || collectionName.value
       console.log('App.vue 切換至資料集：', collectionName.value)
       isLoggedIn.value = true
     } else {
@@ -37,7 +46,13 @@ const handleLogout = () => {
 
   <div v-else>
     <header class="app-header">
-      <h1 class="app-title">車牌管理系統</h1>
+      <div class="header-left">
+        <h1 class="app-title">車牌管理系統</h1>
+        
+        <span v-if="communityDisplayName" class="community-tag">
+          📍 {{ communityDisplayName }}
+        </span>
+      </div>
       <button @click="handleLogout" class="logout-button">登出</button>
     </header>
 
@@ -94,10 +109,32 @@ h1, h2, h3, h4 {
   margin-bottom: 20px;
 }
 
+/* 修正標題樣式，覆蓋掉全域置中的設定 */
 .app-title {
   margin: 0;
   font-size: 1.2rem;
   color: #333;
+  text-align: left; /* 強制靠左對齊 */
+}
+
+
+/* 讓標題與標籤並排的容器 */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px; /* 標題與標籤之間的間距 */
+}
+
+/* 📍 區域標籤的精美樣式 */
+.community-tag {
+  background-color: #f0f7ff;
+  color: #007bff;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  border: 1px solid #cce5ff;
+  white-space: nowrap; /* 確保在手機上文字不會斷行 */
 }
 
 .logout-button {

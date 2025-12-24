@@ -11,7 +11,7 @@ const selectedSuffix = ref(localStorage.getItem('db_suffix') || '')
 
 const suffixOptions = [
   { label: '大陸麗格', value: '' },
-  { label: '大陸豐蒔', value: '_test' },
+  { label: '大陸豐蒔', value: '_epoque' },
   { label: '大陸宝格', value: '_treasure' }
 ]
 
