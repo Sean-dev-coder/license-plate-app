@@ -357,6 +357,47 @@ try {
   }
 }
 
+const syncExistingParkingData = async () => {
+  if (!window.confirm("這將會掃描所有舊資料並建立車位索引，確定執行嗎？")) return;
+  isLoading.value = true;
+  message.value = "正在同步舊車位資料...";
+
+  try {
+    const batch = db.batch();
+    // 1. 抓取所有戶號資料 (請確認 householdCollectionName.value 指向正確的集合)
+    const snapshot = await db.collection(householdCollectionName.value).get();
+    
+    let count = 0;
+    snapshot.forEach(doc => {
+      const data = doc.data();
+      const householdId = doc.id;
+      // 拆解該戶原本存好的車位號碼
+      const parkingArray = data.parking_number 
+        ? data.parking_number.split('/').map(s => s.trim()).filter(Boolean) 
+        : [];
+
+      parkingArray.forEach(spot => {
+        const lookupRef = db.collection('parking_lookup').doc(spot.toUpperCase());
+        batch.set(lookupRef, { 
+          ownerId: householdId,
+          updatedAt: new Date(),
+          note: "由系統自動補齊索引"
+        }, { merge: true });
+        count++;
+      });
+    });
+
+    await batch.commit();
+    message.value = `同步完成！已成功為 ${count} 個車位建立索引。`;
+    isSuccess.value = true;
+  } catch (error) {
+    console.error("同步失敗:", error);
+    message.value = "同步失敗，可能是權限或資料量過大。";
+  } finally {
+    isLoading.value = false;
+  }
+};
+
 const handleCreate = async () => {
    if (!plateToCreate.value) return
   isLoading.value = true
@@ -577,7 +618,14 @@ const handleImageUpload = async () => {
           提示：您可以<a :href="residentListImageUrl" target="_blank">點此在新分頁開啟圖片</a>進行縮放。
        </p>
     </div>
-
+    
+    <div v-if="searchMode === 'residentList'" style="margin-top: 50px; border-top: 1px dashed #ccc; padding-top: 20px;">
+      <p style="color: #888; font-size: 0.8rem;">系統維護區</p>
+      <button @click="syncExistingParkingData" :disabled="isLoading" style="background-color: #6c757d; color: white; border: none; padding: 5px 10px; border-radius: 4px; font-size: 0.8rem;">
+        🔄 補齊舊資料車位索引
+      </button>
+    </div>
+    
   </div>
 </template>
 
