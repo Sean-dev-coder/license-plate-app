@@ -329,44 +329,76 @@ const saveAllChanges = async () => {
   }
 
 try {
-    const batch = db.batch(); // 使用 Batch 確保多表同步
+    const batch = db.batch();
+    const plateDocRef = db.collection(props.collection).doc(selectedItem.value.id);
+    const householdDocRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode);
 
-    // 拆解車位號碼為陣列
-    const parkingArray = householdData.parking_number 
-      ? householdData.parking_number.split('/').map(s => s.trim()).filter(Boolean) 
-      : [];
+    // 1. 取得舊有的車位清單 (從編輯前的備份 itemBeforeEdit 取得)
+    const oldParkingStr = itemBeforeEdit.value.householdInfo?.parking_number || '';
+    const oldParkingArray = oldParkingStr.split('/').map(s => s.trim()).filter(Boolean);
 
-    // 1. 加入主表更新
+    // 2. 取得新輸入的車位清單
+    const newParkingStr = selectedItem.value.householdInfo.parking_number || '';
+    const newParkingArray = newParkingStr.split('/').map(s => s.trim()).filter(Boolean);
+
+    // 3. 找出「哪些車位被刪掉了」(在舊清單有，但新清單沒有)
+    const spotsToDelete = oldParkingArray.filter(spot => !newParkingArray.includes(spot));
+
+    // 4. 更新主表資料
+    const plateData = {
+      householdCode: selectedItem.value.householdCode,
+      notes: selectedItem.value.notes,
+      lastUpdatedBy: auth.currentUser.email,
+      updatedAt: new Date()
+    };
+    
+    const householdData = {
+      name: selectedItem.value.householdInfo.name || '',
+      features: selectedItem.value.householdInfo.features || '',
+      parking_number: newParkingStr,
+      parking: newParkingArray // 同步更新 Array 欄位
+    };
+
     batch.update(plateDocRef, plateData);
-    batch.set(householdDocRef, { ...householdData, parking: parkingArray }, { merge: true });
+    batch.set(householdDocRef, householdData, { merge: true });
 
-    // 2. 加入車位反查表更新
-    parkingArray.forEach(spot => {
-      // 使用動態名稱 lookupCollectionName.value 確保資料不會存錯社區
-      const lookupRef = db.collection(lookupCollectionName.value).doc(spot.toUpperCase());
+    // 5. 【核心修正】刪除不再使用的舊車位索引
+    const targetLookup = lookupCollectionName.value;
+    spotsToDelete.forEach(spot => {
+      const lookupRef = db.collection(targetLookup).doc(spot.toUpperCase());
+      batch.delete(lookupRef);
+      console.log(`🗑️ 移除舊索引: ${spot}`);
+    });
+
+    // 6. 新增或更新現在的車位索引
+    newParkingArray.forEach(spot => {
+      const lookupRef = db.collection(targetLookup).doc(spot.toUpperCase());
       batch.set(lookupRef, { 
         ownerId: selectedItem.value.householdCode,
         updatedAt: new Date()
       }, { merge: true });
+      console.log(`✨ 更新索引: ${spot}`);
     });
 
-    await batch.commit(); // 一次性提交
+    await batch.commit();
     
-    message.value = '所有資料與車位反查索引已更新成功！'
-    isSuccess.value = true
+    message.value = '所有資料與車位反查索引已同步完成！';
+    isSuccess.value = true;
     
-    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
+    // 更新搜尋結果清單中的顯示
+    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id);
     if (index !== -1) { 
-      searchResults.value[index] = { ...selectedItem.value }
+      searchResults.value[index] = { ...selectedItem.value };
     }
-// --- 同步修正：儲存完畢後，確保編輯模式關閉，且重設 isLoading 狀態 ---
-    isEditing.value = false
-    isLoading.value = false
+    
+    isEditing.value = false;
+    isLoading.value = false;
     
   } catch (error) {
-    console.error("儲存失敗:", error)
-    message.value = '儲存失敗，請稍後再試。'
-    isSuccess.value = false
+    console.error("儲存失敗:", error);
+    message.value = '儲存失敗，請稍後再試。';
+    isSuccess.value = false;
+    isLoading.value = false;
   }
 }
 
