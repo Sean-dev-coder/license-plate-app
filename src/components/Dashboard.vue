@@ -215,6 +215,8 @@ try {
       const lookupDoc = await db.collection('parking_lookup').doc(searchInputString).get();
       if (lookupDoc.exists) {
         finalSearchId = lookupDoc.data().ownerId; // 抓到對應的戶號 (如 C219)
+        // --- 同步修正：搜尋成功後，將 UI 模式也切換為 household ---
+        searchMode.value = 'household';
         targetMode = 'household';                 // 強制轉向戶號查詢模式
         message.value = `車位搜尋成功，正在導向戶號：${finalSearchId}`;
       } else {
@@ -250,6 +252,8 @@ try {
     // ... 後面接你原本的 if (querySnapshot && !querySnapshot.empty) 邏輯
     if (querySnapshot && !querySnapshot.empty) {
       searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
+      // --- 同步修正：找到結果後，清除掉剛才搜尋車位的暫存訊息，讓畫面保持乾淨 ---
+      message.value = '';
     } else {
       if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
           message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
@@ -348,7 +352,9 @@ try {
     if (index !== -1) { 
       searchResults.value[index] = { ...selectedItem.value }
     }
+// --- 同步修正：儲存完畢後，確保編輯模式關閉，且重設 isLoading 狀態 ---
     isEditing.value = false
+    isLoading.value = false
     
   } catch (error) {
     console.error("儲存失敗:", error)
@@ -625,7 +631,7 @@ const handleImageUpload = async () => {
         🔄 補齊舊資料車位索引
       </button>
     </div>
-    
+
   </div>
 </template>
 
