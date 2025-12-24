@@ -432,16 +432,48 @@ const handleDelete = async () => {
   if (!selectedItem.value || !selectedItem.value.id) return
   if (!window.confirm(`確定要永久刪除車牌「${selectedItem.value.id}」的資料嗎？`)) { return }
   isLoading.value = true
+  
   try {
+    const batch = db.batch(); // 使用 Batch 確保清理與刪除同步完成
+    
+    // 1. 取得目前該社區的車位反查表名稱
+    const targetLookup = lookupCollectionName.value;
+
+    // 2. 取得要刪除的車位列表 (從目前選中的資料中拆解)
+    const parkingStr = selectedItem.value.householdInfo?.parking_number || '';
+    const parkingArray = parkingStr.split('/').map(s => s.trim()).filter(Boolean);
+
+    // 3. 將清理反查表的動作加入批次
+    parkingArray.forEach(spot => {
+      console.log(spot);
+      const lookupRef = db.collection(targetLookup).doc(spot.toUpperCase());
+      batch.delete(lookupRef);
+    });
+
+    // 4. 加入刪除車牌主檔的動作
+    const plateRef = db.collection(props.collection).doc(selectedItem.value.id);
+    batch.delete(plateRef);
+
+    // 5. 處理圖片刪除 (圖片刪除不支援 Batch，維持原本做法)
     if (selectedItem.value.imageUrl) {
-      const imageRef = storage.refFromURL(selectedItem.value.imageUrl); await imageRef.delete()
+      const imageRef = storage.refFromURL(selectedItem.value.imageUrl);
+      await imageRef.delete();
     }
-    await db.collection(props.collection).doc(selectedItem.value.id).delete()
-    message.value = '資料已成功刪除。'; isSuccess.value = true
+
+    // 6. 提交所有刪除動作
+    await batch.commit();
+
+    message.value = `車牌 ${selectedItem.value.id} 及其車位索引已成功清理。`;
+    isSuccess.value = true
     searchResults.value = searchResults.value.filter(item => item.id !== selectedItem.value.id)
     selectedItem.value = null
-  } catch (error) { console.error("刪除失敗:", error); message.value = '刪除失敗'; isSuccess.value = false }
-  finally { isLoading.value = false }
+  } catch (error) {
+    console.error("刪除失敗:", error);
+    message.value = '刪除失敗，請確認資料狀態';
+    isSuccess.value = false
+  } finally {
+    isLoading.value = false
+  }
 }
 
 const handleFileSelect = (event) => {
