@@ -206,32 +206,48 @@ const handleSearch = async () => {
   selectedItem.value = null
   message.value = ''
   showCreateForm.value = false
-  try {
+try {
+    let finalSearchId = searchInputString;
+    let targetMode = searchMode.value;
+
+    // --- 方案 B：查車位邏輯植入 ---
+    if (searchMode.value === 'parking') {
+      const lookupDoc = await db.collection('parking_lookup').doc(searchInputString).get();
+      if (lookupDoc.exists) {
+        finalSearchId = lookupDoc.data().ownerId; // 抓到對應的戶號 (如 C219)
+        targetMode = 'household';                 // 強制轉向戶號查詢模式
+        message.value = `車位搜尋成功，正在導向戶號：${finalSearchId}`;
+      } else {
+        message.value = `查無車位「${searchInputString}」的登記資料。`;
+        isLoading.value = false; return;
+      }
+    }
+
     let querySnapshot;
-    if (searchMode.value === 'household') {
-      querySnapshot = await db.collection(props.collection).where('householdCode', '==', searchInputString).get()
+    if (targetMode === 'household') {
+      querySnapshot = await db.collection(props.collection).where('householdCode', '==', finalSearchId).get()
       if (querySnapshot.empty) {
-        message.value = `查无户号为「${searchInputString}」的车辆，您可以為此戶號建立住户資料。`
-        householdToCreate.value = { id: searchInputString, name: '', features: '' }
+        message.value = `查無戶號為「${finalSearchId}」的車輛，您可以為此戶號建立住戶資料。`
+        householdToCreate.value = { id: finalSearchId, name: '', features: '' }
         isNewHouseholdModalOpen.value = true
       }
     } else {
-      if (searchInputString.includes('-')) {
-        const docRef = db.collection(props.collection).doc(searchInputString)
+      if (finalSearchId.includes('-')) {
+        const docRef = db.collection(props.collection).doc(finalSearchId)
         const docSnap = await docRef.get()
         if (docSnap.exists) {
           const result = { id: docSnap.id, ...docSnap.data() }; searchResults.value = [result]; selectItem(result)
         } else {
-          message.value = `查無車牌「${searchInputString}」，您可以新增此筆資料。`; isSuccess.value = false; showCreateForm.value = true; plateToCreate.value = searchInputString; selectedItem.value = { householdCode: '', notes: '' }
+          message.value = `查無車牌「${finalSearchId}」，您可以新增此筆資料。`; isSuccess.value = false; showCreateForm.value = true; plateToCreate.value = finalSearchId; selectedItem.value = { householdCode: '', notes: '' }
         }
-        isLoading.value = false
-        return
+        isLoading.value = false; return;
       } else {
-        const searchTerms = searchInputString.split(' ').filter(term => term.length > 0)
+        const searchTerms = finalSearchId.split(' ').filter(term => term.length > 0)
         if (searchTerms.length > 10) { alert('批次查詢最多10個關鍵字。'); isLoading.value = false; return }
         querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
       }
     }
+    // ... 後面接你原本的 if (querySnapshot && !querySnapshot.empty) 邏輯
     if (querySnapshot && !querySnapshot.empty) {
       searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
     } else {
@@ -302,13 +318,30 @@ const saveAllChanges = async () => {
     parking_number: selectedItem.value.householdInfo.parking_number || ''
   }
 
-  try {
-    await Promise.all([
-      plateDocRef.update(plateData),
-      householdDocRef.set(householdData, { merge: true })
-    ])
+try {
+    const batch = db.batch(); // 使用 Batch 確保多表同步
+
+    // 拆解車位號碼為陣列
+    const parkingArray = householdData.parking_number 
+      ? householdData.parking_number.split('/').map(s => s.trim()).filter(Boolean) 
+      : [];
+
+    // 1. 加入主表更新
+    batch.update(plateDocRef, plateData);
+    batch.set(householdDocRef, { ...householdData, parking: parkingArray }, { merge: true });
+
+    // 2. 加入車位反查表更新
+    parkingArray.forEach(spot => {
+      const lookupRef = db.collection('parking_lookup').doc(spot.toUpperCase());
+      batch.set(lookupRef, { 
+        ownerId: selectedItem.value.householdCode,
+        updatedAt: new Date()
+      }, { merge: true });
+    });
+
+    await batch.commit(); // 一次性提交
     
-    message.value = '所有資料更新成功！'
+    message.value = '所有資料與車位反查索引已更新成功！'
     isSuccess.value = true
     
     const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id)
@@ -321,8 +354,6 @@ const saveAllChanges = async () => {
     console.error("儲存失敗:", error)
     message.value = '儲存失敗，請稍後再試。'
     isSuccess.value = false
-  } finally {
-    isLoading.value = false
   }
 }
 
@@ -385,12 +416,13 @@ const handleImageUpload = async () => {
     <div class="search-mode-selector">
       <button :class="{ active: searchMode === 'plate' }" @click="changeSearchMode('plate')">查車牌</button>
       <button :class="{ active: searchMode === 'household' }" @click="changeSearchMode('household')">查戶號</button>
+      <button :class="{ active: searchMode === 'parking' }" @click="changeSearchMode('parking')">查車位</button>
       <button :class="{ active: searchMode === 'residentList' }" @click="changeSearchMode('residentList')">住戶名單</button>
     </div>
 
     <template v-if="searchMode !== 'residentList'">
             <div class="search-section">
-        <input ref="searchInput" v-model="searchPlate" @keyup.enter="handleSearch" :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢或新增' : '請輸入戶號查詢'" :inputmode="isNumericMode ? 'numeric' : 'text'" />
+        <input ref="searchInput" v-model="searchPlate" @keyup.enter="handleSearch" :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢' : (searchMode === 'household' ? '請輸入戶號查詢' : '請輸入車位號碼 (如 B5180)')" :inputmode="isNumericMode ? 'numeric' : 'text'" />
         <div v-if="searchMode === 'plate'" class="toggle-switch-container">
           <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
           <label for="inputModeToggle" class="switch">
