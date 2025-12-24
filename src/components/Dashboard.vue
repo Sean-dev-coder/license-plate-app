@@ -40,6 +40,11 @@ const householdCollectionName = computed(() => {
   return `households${suffix}`;
 });
 
+// 新增：動態對應社區的車位反查表名稱 (例如 parking_lookup_test)
+const lookupCollectionName = computed(() => {
+  const suffix = props.collection.replace('licensePlates', '');
+  return `parking_lookup${suffix}`;
+});
 // --- 修改：載入住戶名單圖片的函式 ---
 const loadResidentListImage = async () => {
   try {
@@ -212,7 +217,8 @@ try {
 
     // --- 方案 B：查車位邏輯植入 ---
     if (searchMode.value === 'parking') {
-      const lookupDoc = await db.collection('parking_lookup').doc(searchInputString).get();
+      // 將原本固定的 'parking_lookup' 改為 lookupCollectionName.value
+      const lookupDoc = await db.collection(lookupCollectionName.value).doc(searchInputString).get();
       if (lookupDoc.exists) {
         finalSearchId = lookupDoc.data().ownerId; // 抓到對應的戶號 (如 C219)
         // --- 同步修正：搜尋成功後，將 UI 模式也切換為 household ---
@@ -336,7 +342,8 @@ try {
 
     // 2. 加入車位反查表更新
     parkingArray.forEach(spot => {
-      const lookupRef = db.collection('parking_lookup').doc(spot.toUpperCase());
+      // 使用動態名稱 lookupCollectionName.value 確保資料不會存錯社區
+      const lookupRef = db.collection(lookupCollectionName.value).doc(spot.toUpperCase());
       batch.set(lookupRef, { 
         ownerId: selectedItem.value.householdCode,
         updatedAt: new Date()
