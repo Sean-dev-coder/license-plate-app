@@ -191,7 +191,7 @@ const handleHouseholdCreate = async () => {
 const changeSearchMode = (mode) => {
   searchMode.value = mode
   message.value = ''; // 切換分頁時清除訊息
-  if (mode === 'household') { isNumericMode.value = false } 
+  if (mode === 'household' || mode === 'parking') { isNumericMode.value = false } 
   else { isNumericMode.value = true }
   if (mode !== 'residentList') {
     nextTick(() => { if (searchInput.value) searchInput.value.focus() })
