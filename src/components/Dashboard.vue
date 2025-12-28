@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, nextTick, watch, computed } from 'vue'
 import { auth, db, storage } from '../firebase.js'
+import imageCompression from 'browser-image-compression';// 這是用來壓縮圖片的套件
 
 // --- 新增：住戶名單功能相關的狀態變數 ---
 const residentListImageUrl = ref('') // 預設是空的，我們會從 Firebase 讀取
@@ -34,6 +35,26 @@ const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 const pendingCount = ref(0); // 待查的數量
 
+// --- 工具：圖片壓縮函式 ---
+const compressImage = async (imageFile) => {
+  // 設定壓縮選項
+  const options = {
+    maxSizeMB: 0.8,          // 目標盡量壓在 0.8MB 以下 (通常會壓到 200-500KB)
+    maxWidthOrHeight: 1920,  // 限制最大寬或高 (1920px 對閱讀文件已經非常足夠)
+    useWebWorker: true,      // 開啟多執行緒加速壓縮
+    fileType: 'image/jpeg'   // 統一轉成 JPEG 格式
+  };
+
+  try {
+    console.log(`原始大小: ${imageFile.size / 1024 / 1024} MB`);
+    const compressedFile = await imageCompression(imageFile, options);
+    console.log(`壓縮後大小: ${compressedFile.size / 1024 / 1024} MB`);
+    return compressedFile;
+  } catch (error) {
+    console.error("圖片壓縮失敗，將使用原圖:", error);
+    return imageFile; // 如果壓縮失敗，就回傳原圖，避免流程卡死
+  }
+}
 // 【關鍵整合：資料選集邏輯】
 const householdCollectionName = computed(() => {
   // 自動偵測車牌集合的後綴，並對應到戶號集合
@@ -127,17 +148,19 @@ const uploadResidentListImage = async () => {
     return;
   }
   isResidentListUploading.value = true;
-  message.value = '總表圖片上傳中...';
+  message.value = '正在壓縮並上傳總表圖片...';
   isSuccess.value = false;
 
   try {
     const suffix = props.collection.replace('licensePlates', '');
     const configDocName = suffix ? `residentList${suffix}` : 'residentList';
-
+    // --- 【新增】 1. 先進行壓縮 ---
+    const compressedFile = await compressImage(residentListFile.value);
     // 1. 將圖片上傳到 Firebase Storage 的動態路徑
+    // 2. 上傳 (注意這裡要改成上傳 compressedFile)
     const imagePath = `system/residentListImage${suffix}`;
     const imageRef = storage.ref().child(imagePath);
-    const uploadTask = await imageRef.put(residentListFile.value);
+    const uploadTask = await imageRef.put(compressedFile);
     const downloadURL = await uploadTask.ref.getDownloadURL();
 
     // 2. 將新的圖片網址儲存到對應的 Config 文件
@@ -560,11 +583,14 @@ const handleFileSelect = (event) => {
 const handleImageUpload = async () => {
   if (!selectedFile.value) { alert('請先選擇圖片檔案！'); return }
   if (!selectedItem.value || !selectedItem.value.id) { alert('請先選擇資料項目'); return }
-  isUploading.value = true; message.value = '圖片上傳中...'; isSuccess.value = false
+  isUploading.value = true; 
+  message.value = '圖片壓縮上傳中...';
+  isSuccess.value = false
   try {
+    const compressedFile = await compressImage(selectedFile.value); // --- 【新增】 壓縮圖片 ---
     const imagePath = `plates/${props.collection}/${selectedItem.value.id}`
     const imageRef = storage.ref().child(imagePath)
-    const uploadTask = await imageRef.put(selectedFile.value)
+    const uploadTask = await imageRef.put(compressedFile)// 上傳壓縮後的檔案
     const downloadURL = await uploadTask.ref.getDownloadURL()
     const docRef = db.collection(props.collection).doc(selectedItem.value.id)
     await docRef.update({ imageUrl: downloadURL })
