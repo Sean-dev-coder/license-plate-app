@@ -32,6 +32,7 @@ const isEditing = ref(false)
 const itemBeforeEdit = ref(null)
 const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
+const pendingCount = ref(0); // 待查的數量
 
 // 【關鍵整合：資料選集邏輯】
 const householdCollectionName = computed(() => {
@@ -64,8 +65,52 @@ const loadResidentListImage = async () => {
   }
 }
 
+// 1. 檢查有多少筆「待查」資料 (用來顯示按鈕上的數字)
+const checkPendingCount = async () => {
+  if (!props.collection) return;
+  try {
+    const snapshot = await db.collection(props.collection)
+      .where('householdCode', '==', '待查')
+      .get();
+    pendingCount.value = snapshot.size; // 根據真實資料更新數字
+  } catch (e) {
+    console.error("檢查待查數量失敗", e);
+  }
+};
+
+// 2. 點擊「待查」按鈕後的動作
+const handlePendingClick = async () => {
+  changeSearchMode('pending'); // 切換模式
+  isLoading.value = true;
+  searchResults.value = [];
+  message.value = '正在載入待查清單...';
+
+  try {
+    const snapshot = await db.collection(props.collection)
+      .where('householdCode', '==', '待查')
+      .get();
+
+    if (!snapshot.empty) {
+      searchResults.value = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      message.value = `查詢完成，共有 ${searchResults.value.length} 筆待查資料。`;
+    } else {
+      message.value = '目前沒有待查資料。';
+      // 如果點了發現沒資料，順便更新一下計數
+      pendingCount.value = 0;
+    }
+  } catch (error) {
+    console.error("載入待查清單失敗:", error);
+    message.value = '載入失敗';
+  } finally {
+    isLoading.value = false;
+  }
+};
 onMounted(() => {
   loadResidentListImage(); // 頁面載入時，自動讀取圖片
+  checkPendingCount(); // <--- 新增這一行：啟動時自動檢查數量
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
@@ -539,10 +584,18 @@ const handleImageUpload = async () => {
       <button :class="{ active: searchMode === 'household' }" @click="changeSearchMode('household')">查戶號</button>
       <button :class="{ active: searchMode === 'parking' }" @click="changeSearchMode('parking')">查車位</button>
       <button :class="{ active: searchMode === 'residentList' }" @click="changeSearchMode('residentList')">住戶名單</button>
+      <button 
+        v-if="pendingCount > 0" 
+        :class="{ active: searchMode === 'pending' }" 
+        @click="handlePendingClick"
+        style="color: #dc3545; font-weight: bold;"
+      >
+        待查 ({{ pendingCount }})
+      </button>
     </div>
 
     <template v-if="searchMode !== 'residentList'">
-            <div class="search-section">
+            <div class="search-section" v-if="searchMode !== 'pending'">
         <input ref="searchInput" v-model="searchPlate" @keyup.enter="handleSearch" :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢' : (searchMode === 'household' ? '請輸入戶號查詢' : '請輸入車位號碼 (如 B5180)')" :inputmode="isNumericMode ? 'numeric' : 'text'" />
         <div v-if="searchMode === 'plate'" class="toggle-switch-container">
           <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
@@ -553,7 +606,9 @@ const handleImageUpload = async () => {
         </div>
         <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
       </div>
-
+      <div v-if="searchMode === 'pending'" class="search-section" style="text-align: center; border: 1px dashed #dc3545; background-color: #fff5f5;">
+        <h3 style="color: #dc3545; margin: 0;">⚠️ 異常/待查車輛清單</h3>
+      </div>
       <div v-if="searchResults.length > 0" class="results-list">
         <h4>找到了 {{ searchResults.length }} 筆結果：</h4>
       <ul>
