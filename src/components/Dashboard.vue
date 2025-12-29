@@ -91,7 +91,7 @@ const checkPendingCount = async () => {
   if (!props.collection) return;
   try {
     const snapshot = await db.collection(props.collection)
-      .where('householdCode', '==', '待查')
+      .where('householdCode', '==', '-')
       .get();
     pendingCount.value = snapshot.size; // 根據真實資料更新數字
   } catch (e) {
@@ -108,7 +108,7 @@ const handlePendingClick = async () => {
 
   try {
     const snapshot = await db.collection(props.collection)
-      .where('householdCode', '==', '待查')
+      .where('householdCode', '==', '-')
       .get();
 
     if (!snapshot.empty) {
