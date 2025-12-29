@@ -530,7 +530,15 @@ const handleCreate = async () => {
   try {
     const docRef = db.collection(props.collection).doc(plateToCreate.value)
     const keywords = plateToCreate.value.toUpperCase().split('-').filter(Boolean)
-    const dataToCreate = { householdCode: selectedItem.value.householdCode, notes: selectedItem.value.notes, createdBy: auth.currentUser.email, createdAt: new Date(), searchKeywords: keywords, imageUrl: '' }
+    const dataToCreate = { 
+      // 加入 .toUpperCase() 強制轉大寫，並加上 || '' 防止出錯
+      householdCode: (selectedItem.value.householdCode || '').toUpperCase(), 
+      notes: selectedItem.value.notes, 
+      createdBy: auth.currentUser.email, 
+      createdAt: new Date(), 
+      searchKeywords: keywords, 
+      imageUrl: '' 
+    }
     await docRef.set(dataToCreate)
     message.value = `車牌「${plateToCreate.value}」已成功新增！`; isSuccess.value = true
     showCreateForm.value = false; selectedItem.value = null; searchPlate.value = plateToCreate.value
@@ -742,7 +750,12 @@ const handleImageUpload = async () => {
 
       <div v-if="showCreateForm" class="result-section">
         <h3>新增車牌：{{ plateToCreate }}</h3>
-        <div class="form-group"><label>戶別代碼:</label><input v-model="selectedItem.householdCode" placeholder="請輸入戶別代碼" /></div>
+        <div class="form-group"><label>戶別代碼:</label>
+        <input 
+          v-model="selectedItem.householdCode" 
+          @input="selectedItem.householdCode = selectedItem.householdCode.toUpperCase()"
+          placeholder="請輸入戶別代碼" />
+        </div>
         <div class="form-group"><label>備註:</label><textarea v-model="selectedItem.notes" rows="3" placeholder="請輸入備註"></textarea></div>
         <div class="actions"><button @click="handleCreate" :disabled="isLoading" class="save-button">確認新增</button></div>
       </div>
