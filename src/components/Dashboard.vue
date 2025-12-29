@@ -98,6 +98,16 @@ const checkPendingCount = async () => {
     console.error("檢查待查數量失敗", e);
   }
 };
+// 只要你切換社區，這裡就會觸發，自動去算新社區的數量
+watch(() => props.collection, async (newVal) => {
+  if (newVal) {
+    // 當社區改變時，如果您希望搜尋模式重置回「查車牌」，可以加這行：
+    // changeSearchMode('plate'); 
+    
+    // 重新檢查該社區的待查數量
+    await checkPendingCount();
+  }
+}, { immediate: true }); // immediate: true 代表畫面剛載入時也會跑一次
 
 // 2. 點擊「待查」按鈕後的動作
 const handlePendingClick = async () => {
@@ -129,9 +139,9 @@ const handlePendingClick = async () => {
     isLoading.value = false;
   }
 };
+
 onMounted(() => {
   loadResidentListImage(); // 頁面載入時，自動讀取圖片
-  checkPendingCount(); // <--- 新增這一行：啟動時自動檢查數量
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
 
