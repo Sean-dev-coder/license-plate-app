@@ -477,6 +477,8 @@ try {
     message.value = '儲存失敗，請稍後再試。';
     isSuccess.value = false;
     isLoading.value = false;
+  } finally {
+    await checkPendingCount(); 
   }
 }
 
