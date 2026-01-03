@@ -35,6 +35,93 @@ const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 const pendingCount = ref(0); // 待查的數量
 
+// --- 新增：語音功能相關狀態 ---
+const isVoiceListening = ref(false);
+const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+let recognition = null;
+
+// --- 工具：文字轉語音 (TTS) ---
+const speak = (text, callback) => {
+  const synth = window.speechSynthesis;
+  if (synth.speaking) { synth.cancel(); }
+
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'zh-TW';
+  utter.rate = 1.0;
+
+  // 當這段話講完時，執行我們交代的動作（例如啟動麥克風）
+  if (callback) {
+    utter.onend = () => {
+      callback();
+    };
+  }
+
+  synth.speak(utter);
+};
+
+// --- 核心：語音辨識 (STT) ---
+// --- 新增：自定義問候語清單 ---
+const greetings = [
+  "大哥辛苦了，請說車牌",
+  "吃飽了嗎，系統準備好了",
+  "現在可以開始查詢車牌"
+];
+
+const startVoiceSearch = () => {
+  if (!Recognition) {
+    alert("您的瀏覽器不支援語音功能");
+    return;
+  }
+
+  // 1. 先決定要說哪一句問候語
+  const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
+  
+  // 2. 更新訊息列，讓您知道系統準備中
+  message.value = `系統準備中：${welcomeMessage}`;
+  isVoiceListening.value = true; // 讓按鈕先閃爍，提醒您準備說話
+
+  // 3. 呼叫 speak，並交代「講完後啟動辨識」
+  speak(welcomeMessage, () => {
+    // 這裡就是「講完問候語」的時刻
+    recognition = new Recognition();
+    recognition.lang = 'zh-TW';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onstart = () => {
+      message.value = "系統聽取中，請說車牌號碼...";
+      searchPlate.value = ''; // 確保啟動時輸入框是空的
+    };
+
+    recognition.onresult = (event) => {
+      let fullTranscript = "";
+      for (let i = 0; i < event.results.length; i++) {
+        fullTranscript += event.results[i][0].transcript;
+      }
+
+      // Windows 句號過濾邏輯
+      const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
+      searchPlate.value = displayResult;
+
+      if (displayResult.includes('查詢')) {
+        let finalCode = displayResult
+          .replace(/\s+/g, '')
+          .replace(/DASH|槓|點/g, '-')
+          .replace('查詢', '');
+
+        searchPlate.value = finalCode;
+        recognition.stop();
+        if (finalCode) { handleSearch(); }
+      }
+    };
+
+    recognition.onend = () => { isVoiceListening.value = false; };
+    
+    // 講完了問候語，現在才正式開啟麥克風
+    recognition.start();
+  });
+};
+
 // --- 工具：圖片壓縮函式 ---
 const compressImage = async (imageFile) => {
   // 設定壓縮選項
@@ -289,64 +376,88 @@ const handleSearch = async () => {
   selectedItem.value = null
   message.value = ''
   showCreateForm.value = false
-try {
+
+  try {
     let finalSearchId = searchInputString;
     let targetMode = searchMode.value;
 
-    // --- 方案 B：查車位邏輯植入 ---
+    // --- 車位搜尋模式 ---
     if (searchMode.value === 'parking') {
-      // 將原本固定的 'parking_lookup' 改為 lookupCollectionName.value
       const lookupDoc = await db.collection(lookupCollectionName.value).doc(searchInputString).get();
       if (lookupDoc.exists) {
-        finalSearchId = lookupDoc.data().ownerId; // 抓到對應的戶號 (如 C219)
-        // --- 同步修正：搜尋成功後，將 UI 模式也切換為 household ---
+        finalSearchId = lookupDoc.data().ownerId;
         searchMode.value = 'household';
-        targetMode = 'household';                 // 強制轉向戶號查詢模式
-        message.value = `車位搜尋成功，正在導向戶號：${finalSearchId}`;
+        targetMode = 'household';
+        const msg = `車位搜尋成功，正在導向戶號：${finalSearchId}`;
+        message.value = msg;
+        speak(msg); // 語音回報成功
       } else {
-        message.value = `查無車位「${searchInputString}」的登記資料。`;
-        isLoading.value = false; return;
+        const errorMsg = `查無車位「${searchInputString}」的登記資料。`;
+        message.value = errorMsg;
+        speak(errorMsg); // 語音回報失敗
+        isLoading.value = false; 
+        return; // 結束，不再往下跑
       }
     }
 
+    // --- 執行實際查詢 ---
     let querySnapshot;
     if (targetMode === 'household') {
       querySnapshot = await db.collection(props.collection).where('householdCode', '==', finalSearchId).get()
       if (querySnapshot.empty) {
-        message.value = `查無戶號為「${finalSearchId}」的車輛，您可以為此戶號建立住戶資料。`
+        const msg = `查無戶號 ${finalSearchId}`;
+        message.value = `查無戶號為「${finalSearchId}」的車輛，您可以為此戶號建立住戶資料。`;
+        speak(msg);
         householdToCreate.value = { id: finalSearchId, name: '', features: '' }
         isNewHouseholdModalOpen.value = true
       }
     } else {
+      // 查車牌模式
       if (finalSearchId.includes('-')) {
         const docRef = db.collection(props.collection).doc(finalSearchId)
         const docSnap = await docRef.get()
         if (docSnap.exists) {
-          const result = { id: docSnap.id, ...docSnap.data() }; searchResults.value = [result]; selectItem(result)
+          const result = { id: docSnap.id, ...docSnap.data() }; 
+          searchResults.value = [result]; 
+          selectItem(result); // 此函數內部會執行語音報讀
         } else {
-          message.value = `查無車牌「${finalSearchId}」，您可以新增此筆資料。`; isSuccess.value = false; showCreateForm.value = true; plateToCreate.value = finalSearchId; selectedItem.value = { householdCode: '', notes: '' }
+          const msg = `查無車牌 ${finalSearchId}`;
+          message.value = msg; 
+          speak(msg);
+          isSuccess.value = false; 
+          showCreateForm.value = true; 
+          plateToCreate.value = finalSearchId; 
+          selectedItem.value = { householdCode: '', notes: '' }
         }
-        isLoading.value = false; return;
+        isLoading.value = false; 
+        return;
       } else {
+        // 關鍵字搜尋
         const searchTerms = finalSearchId.split(' ').filter(term => term.length > 0)
         if (searchTerms.length > 10) { alert('批次查詢最多10個關鍵字。'); isLoading.value = false; return }
         querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
       }
     }
-    // ... 後面接你原本的 if (querySnapshot && !querySnapshot.empty) 邏輯
+
+    // --- 處理查詢結果清單 ---
     if (querySnapshot && !querySnapshot.empty) {
       searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      // --- 同步修正：找到結果後，清除掉剛才搜尋車位的暫存訊息，讓畫面保持乾淨 ---
       message.value = '';
-    } else {
-      if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
-          message.value = `查無任何符合「${searchInputString}」的資料。`; isSuccess.value = false
+      if (searchResults.value.length === 1) {
+        selectItem(searchResults.value[0]);
+      } else {
+        speak(`找到 ${searchResults.value.length} 筆資料`);
       }
+    } else if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
+       const msg = `查無符合內容`;
+       message.value = `查無任何符合「${searchInputString}」的資料。`;
+       speak(msg);
+       isSuccess.value = false
     }
   } catch (error) {
     console.error("查詢失敗:", error)
-    message.value = '查詢時發生錯誤，請稍後再試。'
-    isSuccess.value = false
+    message.value = '查詢時發生錯誤。'
+    speak("系統查詢出錯");
   } finally {
     isLoading.value = false
     if (searchMode.value !== 'residentList') {
@@ -360,6 +471,7 @@ const selectItem = async (item) => {
   isSuccess.value = false
   isLoading.value = true
   let completeItemData = { ...item }
+
   if (item.householdCode) {
     try {
       const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode)
@@ -370,15 +482,20 @@ const selectItem = async (item) => {
         completeItemData.householdInfo = { name: '', features: '', parking_number: ''} 
       }
     } catch (error) {
-      console.error("載入住戶資料失敗:", error); message.value = '載入住戶資料時發生錯誤。'
+      console.error("載入住戶資料失敗:", error);
     }
   }
+
   selectedItem.value = completeItemData
   isEditing.value = false
-  selectedFile.value = null
-  showCreateForm.value = false
   message.value = ''
   isLoading.value = false
+
+  // --- 語音報讀邏輯 ---
+  const unit = completeItemData.householdCode || '未知戶號';
+  const name = completeItemData.householdInfo?.name ? `，住戶${completeItemData.householdInfo.name}` : '，未登記姓名';
+  speak(`查詢成功。車牌 ${item.id}。屬於 ${unit} ${name}`);
+
   nextTick(() => {
     if (editSectionRef.value) {
       editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -643,19 +760,37 @@ const handleImageUpload = async () => {
         待查 ({{ pendingCount }})
       </button>
     </div>
-
     <template v-if="searchMode !== 'residentList'">
-            <div class="search-section" v-if="searchMode !== 'pending'">
-        <input ref="searchInput" v-model="searchPlate" @keyup.enter="handleSearch" :placeholder="searchMode === 'plate' ? '請輸入車牌號碼查詢' : (searchMode === 'household' ? '請輸入戶號查詢' : '請輸入車位號碼 (如 B5180)')" :inputmode="isNumericMode ? 'numeric' : 'text'" />
-        <div v-if="searchMode === 'plate'" class="toggle-switch-container">
-          <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
-          <label for="inputModeToggle" class="switch">
-            <span class="text-off">英文</span>
-            <span class="text-on">數字</span>
-          </label>
-        </div>
-        <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
-      </div>
+<div class="search-section" v-if="searchMode !== 'pending'">
+  <input 
+    ref="searchInput" 
+    v-model="searchPlate" 
+    @keyup.enter="handleSearch" 
+    :placeholder="searchMode === 'plate' ? '請輸入車牌 (例如 123-BNC)' : '請輸入查詢內容'" 
+    :inputmode="isNumericMode ? 'numeric' : 'text'" 
+  />
+
+  <div class="controls-row">
+    <button 
+      @click="startVoiceSearch" 
+      :class="{ 'voice-active': isVoiceListening }"
+      class="voice-btn-round"
+    >
+      {{ isVoiceListening ? '🛑' : '🎤' }}
+    </button>
+
+    <div v-if="searchMode === 'plate'" class="toggle-switch-container">
+      <input type="checkbox" id="inputModeToggle" v-model="isNumericMode" @change="toggleInputMode" />
+      <label for="inputModeToggle" class="switch">
+        <span class="text-off">英文</span>
+        <span class="text-on">數字</span>
+      </label>
+    </div>
+  </div>
+
+  <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
+</div>
+
       <div v-if="searchMode === 'pending'" class="search-section" style="text-align: center; border: 1px dashed #dc3545; background-color: #fff5f5;">
         <h3 style="color: #dc3545; margin: 0;">⚠️ 異常/待查車輛清單</h3>
       </div>
@@ -824,7 +959,48 @@ const handleImageUpload = async () => {
 </template>
 
 <style scoped>
-/* --- 樣式完全保持原樣 --- */
+/* 新增：控制列並排邏輯 */
+.controls-row {
+  display: flex;
+  align-items: center; /* 垂直置中 */
+  gap: 20px;           /* 按鈕與開關的間距 */
+  margin: 5px 0;
+}
+
+/* 語音按鈕樣式優化：改為圓形且與開關高度相稱 */
+.voice-btn-round {
+  width: 45px !important;  /* 稍微縮小以配合開關高度 */
+  height: 45px !important;
+  padding: 0 !important;
+  background-color: #f8f9fa !important;
+  border: 1px solid #ccc !important;
+  border-radius: 50% !important; /* 圓形 */
+  font-size: 20px !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  cursor: pointer;
+}
+
+/* 當語音啟動時的閃爍效果依舊保留 */
+.voice-active {
+  background-color: #ffc107 !important;
+  animation: pulse 1.5s infinite;
+  border-color: #e0a800 !important;
+}
+
+/* 確保切換容器內部不要有額外的 margin 影響並排 */
+.toggle-switch-container {
+  margin: 0 !important;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 193, 7, 0.7); }
+  70% { transform: scale(1.05); box-shadow: 0 0 0 10px rgba(255, 193, 7, 0); }
+  100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 193, 7, 0); }
+}
+
 .resident-list-view {
   margin-top: 20px;
   padding: 20px;
