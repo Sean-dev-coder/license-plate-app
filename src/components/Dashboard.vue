@@ -73,81 +73,79 @@ const startVoiceSearch = () => {
     return;
   }
 
-  // 1. 先決定要說哪一句問候語
-  const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
-  
-  // 2. 更新訊息列，讓您知道系統準備中
-  message.value = `系統準備中：${welcomeMessage}`;
-  isVoiceListening.value = true; // 讓按鈕先閃爍，提醒您準備說話
+  // --- 【核心修改：手動關閉功能】 ---
+  // 如果現在正在錄音或播放問候語，點擊按鈕就直接關閉
+  if (isVoiceListening.value) {
+    // 1. 停止系統說話（如果還在講問候語）
+    if (window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+    }
+    // 2. 停止語音辨識
+    if (recognition) {
+      recognition.stop();
+    }
+    // 3. 重置狀態
+    isVoiceListening.value = false;
+    message.value = "語音監聽已取消";
+    return; // 結束函數，不再往下執行啟動流程
+  }
 
-  // 3. 呼叫 speak，並交代「講完後啟動辨識」
+  // --- 原本的啟動流程 ---
+  const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
+  message.value = `系統準備中：${welcomeMessage}`;
+  isVoiceListening.value = true; // 狀態變為 true，按鈕變為紅色八角形
+
   speak(welcomeMessage, () => {
-    // 這裡就是「講完問候語」的時刻
+    // 檢查是否在說話過程中已經被手動取消
+    if (!isVoiceListening.value) return;
+
     recognition = new Recognition();
     recognition.lang = 'zh-TW';
     recognition.continuous = true;
     recognition.interimResults = true;
 
     recognition.onstart = () => {
-      message.value = "系統聽取中，請說車牌號碼...";
-      searchPlate.value = ''; // 確保啟動時輸入框是空的
+      message.value = "系統聽取中，請說車牌或點擊停止...";
+      searchPlate.value = ''; 
     };
 
-recognition.onresult = (event) => {
-  let fullTranscript = "";
-  
-  // 【新增】判斷是否為電腦端 (Windows, Mac, Linux)
-  const isPC = !/Android|iPhone|iPad/i.test(navigator.userAgent);
-  
-  // 如果是電腦，門檻設為 0 (完全不濾)；手機則維持 0.1 防止環境音
-  const minConfidence = isPC ? 0 : 0.1;
+    recognition.onresult = (event) => {
+      let fullTranscript = "";
+      const isPC = !/Android|iPhone|iPad/i.test(navigator.userAgent);
+      const minConfidence = isPC ? 0 : 0.1;
 
-  for (let i = 0; i < event.results.length; i++) {
-    const result = event.results[i][0];
-    const transcript = result.transcript;
-    const confidence = result.confidence;
+      for (let i = 0; i < event.results.length; i++) {
+        const result = event.results[i][0];
+        if (result.confidence >= minConfidence || result.transcript.includes('查詢')) {
+          fullTranscript += result.transcript;
+        }
+      }
 
-    // 只要分數高於門檻，或是包含「查詢」，就通通留下來
-    if (confidence >= minConfidence || transcript.includes('查詢')) {
-      fullTranscript += transcript;
-    } else {
-      console.log(`過濾噪音片段：${transcript} (門檻為 ${minConfidence})`);
-    }
-  }
+      const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
+      searchPlate.value = displayResult;
 
-  // 1. 文字清理與大寫轉換
-  const cleanedText = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
-  
-  // 2. 即時顯示在輸入框
-  searchPlate.value = cleanedText;
+      if (displayResult.includes('查詢')) {
+        let finalCode = displayResult
+          .replace(/\s+/g, '')
+          .replace(/DASH|槓|點/g, '-')
+          .replace('查詢', '');
 
-  // 3. 判斷是否執行查詢
-  if (cleanedText.includes('查詢')) {
-    let finalCode = cleanedText
-      .replace(/\s+/g, '')
-      .replace(/DASH|槓|點/g, '-')
-      .replace('查詢', '');
+        if (finalCode) {
+          searchPlate.value = finalCode;
+          recognition.stop();
+          handleSearch(); 
+        }
+      }
+    };
 
-    if (finalCode) {
-      searchPlate.value = finalCode; // 更新為純號碼
-      recognition.stop();
-      console.log("觸發查詢，號碼為:", finalCode);
-      handleSearch(); // 執行 Firebase 查詢 [cite: 2025-12-21]
-    } else {
-      // 如果只有關鍵字沒有號碼
-      message.value = "偵測到查詢指令，但沒聽到號碼，請再試一次。";
-      speak("請說出號碼");
-    }
-  }
-};
-
-    recognition.onend = () => { isVoiceListening.value = false; };
+    // 確保結束時圖示會換回麥克風
+    recognition.onend = () => {
+      isVoiceListening.value = false;
+    };
     
-    // 講完了問候語，現在才正式開啟麥克風
     recognition.start();
   });
 };
-
 // --- 工具：圖片壓縮函式 ---
 const compressImage = async (imageFile) => {
   // 設定壓縮選項
