@@ -93,27 +93,53 @@ const startVoiceSearch = () => {
       searchPlate.value = ''; // 確保啟動時輸入框是空的
     };
 
-    recognition.onresult = (event) => {
-      let fullTranscript = "";
-      for (let i = 0; i < event.results.length; i++) {
-        fullTranscript += event.results[i][0].transcript;
-      }
+recognition.onresult = (event) => {
+  let fullTranscript = "";
+  
+  // 【新增】判斷是否為電腦端 (Windows, Mac, Linux)
+  const isPC = !/Android|iPhone|iPad/i.test(navigator.userAgent);
+  
+  // 如果是電腦，門檻設為 0 (完全不濾)；手機則維持 0.1 防止環境音
+  const minConfidence = isPC ? 0 : 0.1;
 
-      // Windows 句號過濾邏輯
-      const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
-      searchPlate.value = displayResult;
+  for (let i = 0; i < event.results.length; i++) {
+    const result = event.results[i][0];
+    const transcript = result.transcript;
+    const confidence = result.confidence;
 
-      if (displayResult.includes('查詢')) {
-        let finalCode = displayResult
-          .replace(/\s+/g, '')
-          .replace(/DASH|槓|點/g, '-')
-          .replace('查詢', '');
+    // 只要分數高於門檻，或是包含「查詢」，就通通留下來
+    if (confidence >= minConfidence || transcript.includes('查詢')) {
+      fullTranscript += transcript;
+    } else {
+      console.log(`過濾噪音片段：${transcript} (門檻為 ${minConfidence})`);
+    }
+  }
 
-        searchPlate.value = finalCode;
-        recognition.stop();
-        if (finalCode) { handleSearch(); }
-      }
-    };
+  // 1. 文字清理與大寫轉換
+  const cleanedText = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
+  
+  // 2. 即時顯示在輸入框
+  searchPlate.value = cleanedText;
+
+  // 3. 判斷是否執行查詢
+  if (cleanedText.includes('查詢')) {
+    let finalCode = cleanedText
+      .replace(/\s+/g, '')
+      .replace(/DASH|槓|點/g, '-')
+      .replace('查詢', '');
+
+    if (finalCode) {
+      searchPlate.value = finalCode; // 更新為純號碼
+      recognition.stop();
+      console.log("觸發查詢，號碼為:", finalCode);
+      handleSearch(); // 執行 Firebase 查詢 [cite: 2025-12-21]
+    } else {
+      // 如果只有關鍵字沒有號碼
+      message.value = "偵測到查詢指令，但沒聽到號碼，請再試一次。";
+      speak("請說出號碼");
+    }
+  }
+};
 
     recognition.onend = () => { isVoiceListening.value = false; };
     
