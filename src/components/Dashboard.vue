@@ -546,9 +546,9 @@ const handleCreate = async () => {
     showCreateForm.value = false; selectedItem.value = null; searchPlate.value = plateToCreate.value
   } catch (error) { console.error("新增失敗:", error); message.value = '新增失敗'; isSuccess.value = false }
   finally { 
-    await checkPendingCount(); 
     isLoading.value = false 
-  }
+    await checkPendingCount(); 
+   }
 }
 
 const handleDelete = async () => {
@@ -594,8 +594,9 @@ const handleDelete = async () => {
     console.error("刪除失敗:", error);
     message.value = '刪除失敗，請確認資料狀態';
     isSuccess.value = false
-  } finally {
-    isLoading.value = false
+  }  finally { 
+    isLoading.value = false 
+    await checkPendingCount(); 
   }
 }
 
