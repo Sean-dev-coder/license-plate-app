@@ -545,7 +545,10 @@ const handleCreate = async () => {
     message.value = `車牌「${plateToCreate.value}」已成功新增！`; isSuccess.value = true
     showCreateForm.value = false; selectedItem.value = null; searchPlate.value = plateToCreate.value
   } catch (error) { console.error("新增失敗:", error); message.value = '新增失敗'; isSuccess.value = false }
-  finally { isLoading.value = false }
+  finally { 
+    await checkPendingCount(); 
+    isLoading.value = false 
+  }
 }
 
 const handleDelete = async () => {
