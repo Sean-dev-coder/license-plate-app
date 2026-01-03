@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, nextTick, watch, computed } from 'vue'
-import { auth, db, storage } from '../firebase.js'
+import { auth, db, storage, functions } from '../firebase.js';
 import imageCompression from 'browser-image-compression';// 這是用來壓縮圖片的套件
 
 // --- 新增：住戶名單功能相關的狀態變數 ---
@@ -40,25 +40,6 @@ const isVoiceListening = ref(false);
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
 
-// --- 工具：文字轉語音 (TTS) ---
-const speak = (text, callback) => {
-  const synth = window.speechSynthesis;
-  if (synth.speaking) { synth.cancel(); }
-
-  const utter = new SpeechSynthesisUtterance(text);
-  utter.lang = 'zh-TW';
-  utter.rate = 1.0;
-
-  // 當這段話講完時，執行我們交代的動作（例如啟動麥克風）
-  if (callback) {
-    utter.onend = () => {
-      callback();
-    };
-  }
-
-  synth.speak(utter);
-};
-
 // --- 核心：語音辨識 (STT) ---
 // --- 新增：自定義問候語清單 ---
 const greetings = [
@@ -66,86 +47,122 @@ const greetings = [
   "吃飽了嗎，系統準備好了",
   "現在可以開始查詢車牌"
 ];
+// --- 1. 優化後的 speak 函式 (區分問候與結果) ---
+const speak = async (text, isResult = false) => {
+  if (!text || text.trim() === "") return;
 
-const startVoiceSearch = () => {
+  // 模式 A：一般問候 (使用瀏覽器內建 TTS，免費且反應快)
+  if (!isResult) {
+    return new Promise((resolve) => {
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'zh-TW';
+      utter.pitch = 1.0;
+      utter.rate = 1.0; 
+      utter.onend = () => resolve(); // 唸完才回傳，讓辨識接手
+      window.speechSynthesis.speak(utter);
+    });
+  }
+
+  isLoading.value = true;
+  try {
+    // --- 修正後的文字處理：移除「字母」二字 ---
+    // 我們保留 split('').join(' ') 的邏輯，這能確保語音是一字一字讀 (如：1 6 6 8 A R Y)
+    // 而不會把 A R Y 當成一個單字讀錯
+    const clearText = text.toUpperCase().split('').map(char => {
+      if (/[A-Z0-9]/.test(char)) return ` ${char} `; 
+      return char;
+    }).join('');
+
+    const getVoice = functions.httpsCallable('getHighQualityVoice'); 
+    const result = await getVoice({ text: clearText });
+    
+    if (result.data && result.data.audioContent) {
+      const audio = new Audio("data:audio/mp3;base64," + result.data.audioContent);
+      audio.play();
+    }
+  } catch (error) {
+    console.error("雲端語音失敗:", error);
+    const utter = new SpeechSynthesisUtterance(text);
+    window.speechSynthesis.speak(utter);
+  } finally {
+    isLoading.value = false;
+  }
+};
+
+// --- 2. 優化後的 startVoiceSearch 函式 (唸完才聽) ---
+const startVoiceSearch = async () => { 
   if (!Recognition) {
     alert("您的瀏覽器不支援語音功能");
     return;
   }
 
-  // --- 【核心修改：手動關閉功能】 ---
-  // 如果現在正在錄音或播放問候語，點擊按鈕就直接關閉
+  // 手動關閉功能：如果正在執行，點擊就停止
   if (isVoiceListening.value) {
-    // 1. 停止系統說話（如果還在講問候語）
-    if (window.speechSynthesis.speaking) {
-      window.speechSynthesis.cancel();
-    }
-    // 2. 停止語音辨識
-    if (recognition) {
-      recognition.stop();
-    }
-    // 3. 重置狀態
+    if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
+    if (recognition) recognition.stop();
     isVoiceListening.value = false;
     message.value = "語音監聽已取消";
-    return; // 結束函數，不再往下執行啟動流程
+    return; 
   }
 
-  // --- 原本的啟動流程 ---
+  // 1. 準備流程
   const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
   message.value = `系統準備中：${welcomeMessage}`;
-  isVoiceListening.value = true; // 狀態變為 true，按鈕變為紅色八角形
+  isVoiceListening.value = true; 
 
-  speak(welcomeMessage, () => {
-    // 檢查是否在說話過程中已經被手動取消
-    if (!isVoiceListening.value) return;
+  // 【核心修改】等待手機唸完問候語，麥克風才「嗶」一聲啟動
+  await speak(welcomeMessage); 
 
-    recognition = new Recognition();
-    recognition.lang = 'zh-TW';
-    recognition.continuous = true;
-    recognition.interimResults = true;
+  // 如果在唸問候語的過程中被手動取消，就不啟動麥克風
+  if (!isVoiceListening.value) return;
 
-    recognition.onstart = () => {
-      message.value = "系統聽取中，請說車牌或點擊停止...";
-      searchPlate.value = ''; 
-    };
+  // 2. 啟動辨識
+  recognition = new Recognition();
+  recognition.lang = 'zh-TW';
+  recognition.continuous = true;
+  recognition.interimResults = true;
 
-    recognition.onresult = (event) => {
-      let fullTranscript = "";
-      const isPC = !/Android|iPhone|iPad/i.test(navigator.userAgent);
-      const minConfidence = isPC ? 0 : 0.1;
+  recognition.onstart = () => {
+    message.value = "系統聽取中，請說車牌或點擊停止...";
+    searchPlate.value = ''; 
+  };
 
-      for (let i = 0; i < event.results.length; i++) {
-        const result = event.results[i][0];
-        if (result.confidence >= minConfidence || result.transcript.includes('查詢')) {
-          fullTranscript += result.transcript;
-        }
+  recognition.onresult = (event) => {
+    let fullTranscript = "";
+    const isPC = !/Android|iPhone|iPad/i.test(navigator.userAgent);
+    const minConfidence = isPC ? 0 : 0.1; // 手動調整靈敏度
+
+    for (let i = 0; i < event.results.length; i++) {
+      const result = event.results[i][0];
+      if (result.confidence >= minConfidence || result.transcript.includes('查詢')) {
+        fullTranscript += result.transcript;
       }
+    }
 
-      const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
-      searchPlate.value = displayResult;
+    const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
+    searchPlate.value = displayResult;
 
-      if (displayResult.includes('查詢')) {
-        let finalCode = displayResult
-          .replace(/\s+/g, '')
-          .replace(/DASH|槓|點/g, '-')
-          .replace('查詢', '');
+    if (displayResult.includes('查詢')) {
+      let finalCode = displayResult
+        .replace(/\s+/g, '')
+        .replace(/DASH|槓|點/g, '-')
+        .replace('查詢', '');
 
-        if (finalCode) {
-          searchPlate.value = finalCode;
-          recognition.stop();
-          handleSearch(); 
-        }
+      if (finalCode) {
+        searchPlate.value = finalCode;
+        recognition.stop();
+        handleSearch(); // 執行搜尋
       }
-    };
+    }
+  };
 
-    // 確保結束時圖示會換回麥克風
-    recognition.onend = () => {
-      isVoiceListening.value = false;
-    };
-    
-    recognition.start();
-  });
+  recognition.onend = () => {
+    isVoiceListening.value = false;
+  };
+  
+  recognition.start();
 };
+
 // --- 工具：圖片壓縮函式 ---
 const compressImage = async (imageFile) => {
   // 設定壓縮選項
@@ -491,41 +508,55 @@ const handleSearch = async () => {
 }
 
 const selectItem = async (item) => {
-  message.value = '正在載入詳細資料...'
-  isSuccess.value = false
-  isLoading.value = true
-  let completeItemData = { ...item }
+  if (!item) return;
+  
+  message.value = '正在載入詳細資料...';
+  isSuccess.value = false;
+  isLoading.value = true;
+  
+  let completeItemData = { ...item };
 
+  // 1. 抓取住戶詳細資料
   if (item.householdCode) {
     try {
-      const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode)
-      const householdDocSnap = await householdDocRef.get()
+      const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode);
+      const householdDocSnap = await householdDocRef.get();
       if (householdDocSnap.exists) {
-        completeItemData.householdInfo = householdDocSnap.data()
+        completeItemData.householdInfo = householdDocSnap.data();
       } else {
-        completeItemData.householdInfo = { name: '', features: '', parking_number: ''} 
+        completeItemData.householdInfo = { name: '', features: '', parking_number: '' };
       }
     } catch (error) {
       console.error("載入住戶資料失敗:", error);
     }
   }
 
-  selectedItem.value = completeItemData
-  isEditing.value = false
-  message.value = ''
-  isLoading.value = false
+  selectedItem.value = completeItemData;
+  isEditing.value = false;
+  message.value = '';
+  isLoading.value = false;
 
-  // --- 語音報讀邏輯 ---
-  const unit = completeItemData.householdCode || '未知戶號';
-  const name = completeItemData.householdInfo?.name ? `，住戶${completeItemData.householdInfo.name}` : '，未登記姓名';
-  speak(`查詢成功。車牌 ${item.id}。屬於 ${unit} ${name}`);
+  // --- 2. 【核心修正】語音報讀文字防彈處理 ---
+  // 確保每個變數都有預設值，避免出現 undefined
+  const plateId = item.id || '未知車牌';
+  const unitCode = completeItemData.householdCode || '尚未登記戶號';
+  const userName = completeItemData.householdInfo?.name ? `，住戶 ${completeItemData.householdInfo.name}` : '';
+
+  // 組合最終文字
+  const finalSpeechText = `查詢成功。車牌 ${plateId}。屬於 ${unitCode} ${userName}`;
+
+  console.log("📢 準備送往雲端報讀的文字:", finalSpeechText);
+
+  // 3. 執行報讀 (傳入 true 代表要用高品質雲端語音)
+  // 這裡會檢查 finalSpeechText 是否為空，若是空就不會去打 API
+  speak(finalSpeechText, true);
 
   nextTick(() => {
     if (editSectionRef.value) {
       editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
-  })
-}
+  });
+};
 
 const saveAllChanges = async () => {
   if (!selectedItem.value || !selectedItem.value.id) return
