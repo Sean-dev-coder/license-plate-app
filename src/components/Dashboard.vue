@@ -482,7 +482,10 @@ const handleSearch = async (isVoice = false) => {
         if (fromVoice) speak(`找到 ${searchResults.value.length} 筆資料`);
       }
     } else if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
-        if (fromVoice) speak("查無符合內容");
+        if (fromVoice) {
+         // [優化] 結合輸入的字串唸出，且 speak 函式會自動處理字母拆讀 (例如 A B C)
+         speak(`查無 ${searchInputString} 的車牌`);
+        }
     }
   } catch (error) {
     if (fromVoice) speak("系統查詢出錯");
