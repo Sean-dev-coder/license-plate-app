@@ -127,34 +127,49 @@ const startVoiceSearch = async () => {
     searchPlate.value = ''; 
   };
 
-  recognition.onresult = (event) => {
-    let fullTranscript = "";
-    const isPC = !/Android|iPhone|iPad/i.test(navigator.userAgent);
-    const minConfidence = isPC ? 0 : 0.1; // 手動調整靈敏度
+// --- 修改後的 recognition.onresult ---
+recognition.onresult = (event) => {
+  let fullTranscript = "";
+  let isFinalResult = false; // 新增：用來標記是否有最終結果
+  
+  const isPC = !/Android|iPhone|iPad/i.test(navigator.userAgent);
+  const minConfidence = isPC ? 0 : 0.1;
 
-    for (let i = 0; i < event.results.length; i++) {
-      const result = event.results[i][0];
-      if (result.confidence >= minConfidence || result.transcript.includes('查詢')) {
-        fullTranscript += result.transcript;
-      }
+  for (let i = event.resultIndex; i < event.results.length; i++) {
+    const result = event.results[i][0];
+    const item = event.results[i];
+    console.log(`辨識結果: ${result.transcript} (信心指數: ${result.confidence})`, item);
+    if (item.isFinal) {
+      isFinalResult = true; // 標記這是一個最終確定的片段
     }
 
-    const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
-    searchPlate.value = displayResult;
-
-    if (displayResult.includes('查詢')) {
-      let finalCode = displayResult
-        .replace(/\s+/g, '')
-        .replace(/DASH|槓|點/g, '-')
-        .replace('查詢', '');
-
-      if (finalCode) {
-        searchPlate.value = finalCode;
-        recognition.stop();
-        handleSearch(); // 執行搜尋
-      }
+    if (result.confidence >= minConfidence || result.transcript.includes('查詢')) {
+      fullTranscript += result.transcript;
     }
-  };
+  }
+
+  const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
+  searchPlate.value = displayResult;
+
+  // --- 關鍵修正：必須同時滿足「包含查詢」且「辨識結束」 ---
+  if (displayResult.includes('查詢') && isFinalResult) {
+    let finalCode = displayResult
+      .replace(/\s+/g, '')
+      .replace(/DASH|槓|點/g, '-')
+      .replace('查詢', '');
+
+    if (finalCode) {
+      searchPlate.value = finalCode;
+      
+      // 先關閉監聽與旗標，避免重複入
+      recognition.stop();
+      isVoiceListening.value = false; 
+      
+      console.log("🎤 語音確認，準備搜尋:", finalCode);
+      handleSearch(); // 執行搜尋
+    }
+  }
+};
 
   recognition.onend = () => {
     isVoiceListening.value = false;
