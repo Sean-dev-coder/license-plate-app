@@ -888,7 +888,7 @@ const handleImageUpload = async () => {
         </div>
         <div class="form-group">
           <label>車位號碼:</label>
-          <p v-if="selectedItem.householdInfo.parking_number">{{ selectedItem.householdInfo.parking_number }}</p>
+          <p v-if="selectedItem.householdInfo && selectedItem.householdInfo.parking_number">{{ selectedItem.householdInfo.parking_number }}</p>
         </div>
         <div class="form-group">
           <label>相關圖片:</label>
