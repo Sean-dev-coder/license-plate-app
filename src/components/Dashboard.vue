@@ -82,7 +82,7 @@ const speak = async (text, isResult = false) => {
       audioPlayer.src = "data:audio/mp3;base64," + result.data.audioContent;
       audioPlayer.onended = () => {
         // [關鍵] 報讀完畢，恢復監聽
-        setTimeout(() => { isSystemSpeaking.value = false; }, 500);
+        setTimeout(() => { isSystemSpeaking.value = false; }, 1000);
       };
       await audioPlayer.play();
     }
