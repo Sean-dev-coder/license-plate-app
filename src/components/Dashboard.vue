@@ -34,12 +34,11 @@ const itemBeforeEdit = ref(null)
 const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 const pendingCount = ref(0); // 待查的數量
-const audioPlayer = new Audio();
 // --- 新增：語音功能相關狀態 ---
 const isVoiceListening = ref(false);
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
-
+const audioPlayer = new Audio();
 // --- 核心：語音辨識 (STT) ---
 // --- 新增：自定義問候語清單 ---
 const greetings = [
@@ -78,6 +77,8 @@ const speak = async (text, isResult = false) => {
     
     if (result.data && result.data.audioContent) {
       audioPlayer.src = "data:audio/mp3;base64," + result.data.audioContent;
+      // 因為我們在 startVoiceSearch 時已經 play 過一次這個物件，
+      // iOS 現在會允許它在非同步（await）後再次 play。
       audioPlayer.play();
     }
   } catch (error) {
@@ -95,8 +96,17 @@ const startVoiceSearch = async () => {
     alert("您的瀏覽器不支援語音功能");
     return;
   }
-    audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA="; // 極短無聲檔
-  audioPlayer.play().catch(e => console.log("預先解鎖中..."));
+
+  // --- 【關鍵：新增解鎖代碼】 ---
+  // 先塞入一個空的無聲內容並立刻播放，這是在點擊事件發生的瞬間，iOS 會放行
+  audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA=";
+  audioPlayer.play().catch(() => {}); 
+  
+  // 原生語音也需要解鎖 (選做，但建議加上)
+  const silentUtter = new SpeechSynthesisUtterance('');
+  window.speechSynthesis.speak(silentUtter);
+  // -------------------------
+
   // 手動關閉功能：如果正在執行，點擊就停止
   if (isVoiceListening.value) {
     if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
