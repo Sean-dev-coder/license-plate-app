@@ -138,7 +138,6 @@ recognition.onresult = (event) => {
   for (let i = event.resultIndex; i < event.results.length; i++) {
     const result = event.results[i][0];
     const item = event.results[i];
-    console.log(`辨識結果: ${result.transcript} (信心指數: ${result.confidence})`, item);
     if (item.isFinal) {
       isFinalResult = true; // 標記這是一個最終確定的片段
     }
