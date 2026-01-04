@@ -104,7 +104,9 @@ const startVoiceSearch = async () => {
   audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA=";
   audioPlayer.play().catch(() => {}); 
   window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
-
+  // [優化] 請求螢幕恆亮，防止手機因自動鎖屏而切斷麥克風
+  try { if ('wakeLock' in navigator) navigator.wakeLock.request('screen'); } catch (e) { console.log('恆亮失敗', e); }
+  
   if (isVoiceListening.value) {
     isVoiceListening.value = false;
     if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
