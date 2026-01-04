@@ -38,6 +38,7 @@ const pendingCount = ref(0); // 待查的數量
 const isVoiceListening = ref(false);
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recognition = null;
+const isSystemSpeaking = ref(false); // [新功能] 防止系統報讀時自己聽自己
 const audioPlayer = new Audio();
 // --- 核心：語音辨識 (STT) ---
 // --- 新增：自定義問候語清單 ---
@@ -46,27 +47,29 @@ const greetings = [
   "吃飽了嗎，系統準備好了",
   "現在可以開始查詢車牌"
 ];
-// --- 1. 優化後的 speak 函式 (區分問候與結果) ---
+// --- 1. 優化後的 speak 函式 (支援防干擾閘門) ---
 const speak = async (text, isResult = false) => {
   if (!text || text.trim() === "") return;
 
-  // 模式 A：一般問候 (使用瀏覽器內建 TTS，免費且反應快)
+  isSystemSpeaking.value = true; // [關鍵] 告訴系統：現在正在報讀，請暫停聽取
+
+  // 模式 A：一般問候 (原生 TTS)
   if (!isResult) {
     return new Promise((resolve) => {
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'zh-TW';
-      utter.pitch = 1.0;
-      utter.rate = 1.0; 
-      utter.onend = () => resolve(); // 唸完才回傳，讓辨識接手
+      utter.onend = () => {
+        // 稍微延遲 0.5 秒再恢復監聽，避開回音
+        setTimeout(() => { isSystemSpeaking.value = false; }, 500);
+        resolve();
+      };
       window.speechSynthesis.speak(utter);
     });
   }
 
+  // 模式 B：結果報讀 (Firebase 雲端語音)
   isLoading.value = true;
   try {
-    // --- 修正後的文字處理：移除「字母」二字 ---
-    // 我們保留 split('').join(' ') 的邏輯，這能確保語音是一字一字讀 (如：1 6 6 8 A R Y)
-    // 而不會把 A R Y 當成一個單字讀錯
     const clearText = text.toUpperCase().split('').map(char => {
       if (/[A-Z0-9]/.test(char)) return ` ${char} `; 
       return char;
@@ -77,101 +80,81 @@ const speak = async (text, isResult = false) => {
     
     if (result.data && result.data.audioContent) {
       audioPlayer.src = "data:audio/mp3;base64," + result.data.audioContent;
-      // 因為我們在 startVoiceSearch 時已經 play 過一次這個物件，
-      // iOS 現在會允許它在非同步（await）後再次 play。
-      audioPlayer.play();
+      audioPlayer.onended = () => {
+        // [關鍵] 報讀完畢，恢復監聽
+        setTimeout(() => { isSystemSpeaking.value = false; }, 500);
+      };
+      await audioPlayer.play();
     }
   } catch (error) {
     console.error("雲端語音失敗:", error);
     const utter = new SpeechSynthesisUtterance(text);
+    utter.onend = () => { isSystemSpeaking.value = false; };
     window.speechSynthesis.speak(utter);
   } finally {
     isLoading.value = false;
   }
 };
 
-// --- 2. 優化後的 startVoiceSearch 函式 (唸完才聽) ---
+// --- 2. 持續監聽版 startVoiceSearch (自動重啟不中斷) ---
 const startVoiceSearch = async () => { 
-  if (!Recognition) {
-    alert("您的瀏覽器不支援語音功能");
-    return;
-  }
+  if (!Recognition) return alert("您的瀏覽器不支援語音功能");
 
-  // --- 【關鍵：新增解鎖代碼】 ---
-  // 先塞入一個空的無聲內容並立刻播放，這是在點擊事件發生的瞬間，iOS 會放行
+  // [iOS 解鎖] 點擊瞬間執行音訊預熱，解決 iPhone 報錯
   audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA=";
   audioPlayer.play().catch(() => {}); 
-  
-  // 原生語音也需要解鎖 (選做，但建議加上)
-  const silentUtter = new SpeechSynthesisUtterance('');
-  window.speechSynthesis.speak(silentUtter);
-  // -------------------------
+  window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
 
-  // 手動關閉功能：如果正在執行，點擊就停止
   if (isVoiceListening.value) {
+    isVoiceListening.value = false;
     if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
     if (recognition) recognition.stop();
-    isVoiceListening.value = false;
-    message.value = "語音監聽已取消";
+    message.value = "語音監聽已關閉";
     return; 
   }
 
-  // 1. 準備流程
   const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
-  message.value = `系統準備中：${welcomeMessage}`;
   isVoiceListening.value = true; 
-
-  // 【核心修改】等待手機唸完問候語，麥克風才「嗶」一聲啟動
+  message.value = `系統啟動：${welcomeMessage}`;
   await speak(welcomeMessage); 
 
-  // 如果在唸問候語的過程中被手動取消，就不啟動麥克風
   if (!isVoiceListening.value) return;
 
-  // 2. 啟動辨識
   recognition = new Recognition();
   recognition.lang = 'zh-TW';
-  recognition.continuous = true;
+  recognition.continuous = true; // [關鍵] 開啟持續模式
   recognition.interimResults = true;
 
-  recognition.onstart = () => {
-    message.value = "系統聽取中，請說車牌或點擊停止...";
-    searchPlate.value = ''; 
-  };
+  recognition.onstart = () => { message.value = "🎤 持續監聽中..."; };
 
   recognition.onresult = (event) => {
+    // [關鍵] 系統說話時，暫停接收指令
+    if (isSystemSpeaking.value) return;
+
     let fullTranscript = "";
-    let isFinalResult = false; // 新增：用來判斷是否辨識結束
+    let isFinalResult = false; 
 
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) {
-        isFinalResult = true; // 確定這一句已經講完了
-      }
+      if (event.results[i].isFinal) isFinalResult = true;
       fullTranscript += event.results[i][0].transcript;
     }
 
     const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
     searchPlate.value = displayResult;
 
-    // 關鍵修正：必須同時包含「查詢」關鍵字，且辨識已經 Final
     if (displayResult.includes('查詢') && isFinalResult) {
-      let finalCode = displayResult
-        .replace(/\s+/g, '')
-        .replace(/DASH|槓|點/g, '-')
-        .replace('查詢', '');
-
+      let finalCode = displayResult.replace(/\s+/g, '').replace(/DASH|槓|點/g, '-').replace('查詢', '');
       if (finalCode) {
         searchPlate.value = finalCode;
-        recognition.stop(); // 停止麥克風
-        isVoiceListening.value = false;
-        
-        console.log("🎤 語音確認，執行搜尋:", finalCode);
-        handleSearch(true); // <--- 傳入 true，代表這是語音啟動
+        handleSearch(true); 
+        searchPlate.value = ''; // [關鍵] 查完清空，繼續等下一台
       }
     }
   };
 
   recognition.onend = () => {
-    isVoiceListening.value = false;
+    // [關鍵] 若非手動停止，自動重啟監聽
+    if (isVoiceListening.value) { recognition.start(); }
   };
   
   recognition.start();
