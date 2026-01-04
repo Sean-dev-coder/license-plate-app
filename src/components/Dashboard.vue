@@ -127,48 +127,37 @@ const startVoiceSearch = async () => {
     searchPlate.value = ''; 
   };
 
-// --- 修改後的 recognition.onresult ---
-recognition.onresult = (event) => {
-  let fullTranscript = "";
-  let isFinalResult = false; // 新增：用來標記是否有最終結果
-  
-  const isPC = !/Android|iPhone|iPad/i.test(navigator.userAgent);
-  const minConfidence = isPC ? 0 : 0.1;
+  recognition.onresult = (event) => {
+    let fullTranscript = "";
+    let isFinalResult = false; // 新增：用來判斷是否辨識結束
 
-  for (let i = event.resultIndex; i < event.results.length; i++) {
-    const result = event.results[i][0];
-    const item = event.results[i];
-    if (item.isFinal) {
-      isFinalResult = true; // 標記這是一個最終確定的片段
+    for (let i = event.resultIndex; i < event.results.length; i++) {
+      if (event.results[i].isFinal) {
+        isFinalResult = true; // 確定這一句已經講完了
+      }
+      fullTranscript += event.results[i][0].transcript;
     }
 
-    if (result.confidence >= minConfidence || result.transcript.includes('查詢')) {
-      fullTranscript += result.transcript;
+    const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
+    searchPlate.value = displayResult;
+
+    // 關鍵修正：必須同時包含「查詢」關鍵字，且辨識已經 Final
+    if (displayResult.includes('查詢') && isFinalResult) {
+      let finalCode = displayResult
+        .replace(/\s+/g, '')
+        .replace(/DASH|槓|點/g, '-')
+        .replace('查詢', '');
+
+      if (finalCode) {
+        searchPlate.value = finalCode;
+        recognition.stop(); // 停止麥克風
+        isVoiceListening.value = false;
+        
+        console.log("🎤 語音確認，執行搜尋:", finalCode);
+        handleSearch(true); // <--- 傳入 true，代表這是語音啟動
+      }
     }
-  }
-
-  const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
-  searchPlate.value = displayResult;
-
-  // --- 關鍵修正：必須同時滿足「包含查詢」且「辨識結束」 ---
-  if (displayResult.includes('查詢') && isFinalResult) {
-    let finalCode = displayResult
-      .replace(/\s+/g, '')
-      .replace(/DASH|槓|點/g, '-')
-      .replace('查詢', '');
-
-    if (finalCode) {
-      searchPlate.value = finalCode;
-      
-      // 先關閉監聽與旗標，避免重複入
-      recognition.stop();
-      isVoiceListening.value = false; 
-      
-      console.log("🎤 語音確認，準備搜尋:", finalCode);
-      handleSearch(); // 執行搜尋
-    }
-  }
-};
+  };
 
   recognition.onend = () => {
     isVoiceListening.value = false;
@@ -422,7 +411,10 @@ const toggleInputMode = () => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 }
 
-const handleSearch = async () => {
+const handleSearch = async (isVoice = false) => {
+  // 確保 isVoice 是布林值 (防止 Event 物件干擾)
+  const fromVoice = isVoice === true; 
+
   if (!searchPlate.value) { alert('請輸入查詢內容！'); return }
   const searchInputString = searchPlate.value.toUpperCase().trim()
   searchPlate.value = ''
@@ -436,7 +428,6 @@ const handleSearch = async () => {
     let finalSearchId = searchInputString;
     let targetMode = searchMode.value;
 
-    // --- 車位搜尋模式 ---
     if (searchMode.value === 'parking') {
       const lookupDoc = await db.collection(lookupCollectionName.value).doc(searchInputString).get();
       if (lookupDoc.exists) {
@@ -445,41 +436,36 @@ const handleSearch = async () => {
         targetMode = 'household';
         const msg = `車位搜尋成功，正在導向戶號：${finalSearchId}`;
         message.value = msg;
-        speak(msg); // 語音回報成功
+        if (fromVoice) speak(msg); // 只有語音模式才報讀
       } else {
-        const errorMsg = `查無車位「${searchInputString}」的登記資料。`;
+        const errorMsg = `查無車位「${searchInputString}」`;
         message.value = errorMsg;
-        speak(errorMsg); // 語音回報失敗
+        if (fromVoice) speak(errorMsg); // 只有語音模式才報讀
         isLoading.value = false; 
-        return; // 結束，不再往下跑
+        return;
       }
     }
 
-    // --- 執行實際查詢 ---
     let querySnapshot;
     if (targetMode === 'household') {
       querySnapshot = await db.collection(props.collection).where('householdCode', '==', finalSearchId).get()
       if (querySnapshot.empty) {
-        const msg = `查無戶號 ${finalSearchId}`;
-        message.value = `查無戶號為「${finalSearchId}」的車輛，您可以為此戶號建立住戶資料。`;
-        speak(msg);
+        if (fromVoice) speak(`查無戶號 ${finalSearchId}`);
         householdToCreate.value = { id: finalSearchId, name: '', features: '' }
         isNewHouseholdModalOpen.value = true
       }
     } else {
-      // 查車牌模式
       if (finalSearchId.includes('-')) {
         const docRef = db.collection(props.collection).doc(finalSearchId)
         const docSnap = await docRef.get()
         if (docSnap.exists) {
           const result = { id: docSnap.id, ...docSnap.data() }; 
           searchResults.value = [result]; 
-          selectItem(result); // 此函數內部會執行語音報讀
+          selectItem(result, fromVoice); // <--- 將語音旗標傳下去
         } else {
           const msg = `查無車牌 ${finalSearchId}`;
           message.value = msg; 
-          speak(msg);
-          isSuccess.value = false; 
+          if (fromVoice) speak(msg); // 只有語音模式才報讀
           showCreateForm.value = true; 
           plateToCreate.value = finalSearchId; 
           selectedItem.value = { householdCode: '', notes: '' }
@@ -487,62 +473,45 @@ const handleSearch = async () => {
         isLoading.value = false; 
         return;
       } else {
-        // 關鍵字搜尋
         const searchTerms = finalSearchId.split(' ').filter(term => term.length > 0)
-        if (searchTerms.length > 10) { alert('批次查詢最多10個關鍵字。'); isLoading.value = false; return }
         querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
       }
     }
 
-    // --- 處理查詢結果清單 ---
     if (querySnapshot && !querySnapshot.empty) {
       searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      message.value = '';
       if (searchResults.value.length === 1) {
-        selectItem(searchResults.value[0]);
+        selectItem(searchResults.value[0], fromVoice); // <--- 將語音旗標傳下去
       } else {
-        speak(`找到 ${searchResults.value.length} 筆資料`);
+        if (fromVoice) speak(`找到 ${searchResults.value.length} 筆資料`);
       }
     } else if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
-       const msg = `查無符合內容`;
-       message.value = `查無任何符合「${searchInputString}」的資料。`;
-       speak(msg);
-       isSuccess.value = false
+        if (fromVoice) speak("查無符合內容");
     }
   } catch (error) {
-    console.error("查詢失敗:", error)
-    message.value = '查詢時發生錯誤。'
-    speak("系統查詢出錯");
+    if (fromVoice) speak("系統查詢出錯");
   } finally {
     isLoading.value = false
-    if (searchMode.value !== 'residentList') {
-      nextTick(() => { if (searchInput.value) searchInput.value.focus() })
-    }
   }
 }
 
-const selectItem = async (item) => {
+const selectItem = async (item, isVoice = false) => {
+  const fromVoice = isVoice === true; // 確保布林值
   if (!item) return;
   
   message.value = '正在載入詳細資料...';
-  isSuccess.value = false;
   isLoading.value = true;
   
   let completeItemData = { ...item };
 
-  // 1. 抓取住戶詳細資料
   if (item.householdCode) {
     try {
       const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode);
       const householdDocSnap = await householdDocRef.get();
       if (householdDocSnap.exists) {
         completeItemData.householdInfo = householdDocSnap.data();
-      } else {
-        completeItemData.householdInfo = { name: '', features: '', parking_number: '' };
       }
-    } catch (error) {
-      console.error("載入住戶資料失敗:", error);
-    }
+    } catch (error) { console.error(error); }
   }
 
   selectedItem.value = completeItemData;
@@ -550,20 +519,15 @@ const selectItem = async (item) => {
   message.value = '';
   isLoading.value = false;
 
-  // --- 2. 【核心修正】語音報讀文字防彈處理 ---
-  // 確保每個變數都有預設值，避免出現 undefined
-  const plateId = item.id || '未知車牌';
-  const unitCode = completeItemData.householdCode || '尚未登記戶號';
-  const userName = completeItemData.householdInfo?.name ? `，住戶 ${completeItemData.householdInfo.name}` : '';
+  // --- 關鍵判斷：只有語音模式才報讀 ---
+  if (fromVoice) {
+    const plateId = item.id || '未知車牌';
+    const unitCode = completeItemData.householdCode || '尚未登記戶號';
+    const userName = completeItemData.householdInfo?.name ? `，住戶 ${completeItemData.householdInfo.name}` : '';
+    const finalSpeechText = `查詢成功。車牌 ${plateId}。屬於 ${unitCode} ${userName}`;
 
-  // 組合最終文字
-  const finalSpeechText = `查詢成功。車牌 ${plateId}。屬於 ${unitCode} ${userName}`;
-
-  console.log("📢 準備送往雲端報讀的文字:", finalSpeechText);
-
-  // 3. 執行報讀 (傳入 true 代表要用高品質雲端語音)
-  // 這裡會檢查 finalSpeechText 是否為空，若是空就不會去打 API
-  speak(finalSpeechText, true);
+    speak(finalSpeechText, true); // 只有這裡會觸發高品質報讀
+  }
 
   nextTick(() => {
     if (editSectionRef.value) {
@@ -857,7 +821,7 @@ const handleImageUpload = async () => {
     </div>
   </div>
 
-  <button @click="handleSearch" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
+  <button @click="handleSearch(false)" :disabled="isLoading">{{ isLoading ? '處理中...' : '查詢' }}</button>
 </div>
 
       <div v-if="searchMode === 'pending'" class="search-section" style="text-align: center; border: 1px dashed #dc3545; background-color: #fff5f5;">
@@ -866,7 +830,7 @@ const handleImageUpload = async () => {
       <div v-if="searchResults.length > 0" class="results-list">
         <h4>找到了 {{ searchResults.length }} 筆結果：</h4>
       <ul>
-        <li v-for="item in searchResults" :key="item.id" @click="selectItem(item)" :class="{ active: selectedItem && selectedItem.id === item.id }">
+        <li v-for="item in searchResults" :key="item.id" @click="selectItem(item,false)" :class="{ active: selectedItem && selectedItem.id === item.id }">
           <div class="list-item-content">
             <span class="plate-id">{{ item.id }}</span>
             
