@@ -34,7 +34,7 @@ const itemBeforeEdit = ref(null)
 const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 const pendingCount = ref(0); // 待查的數量
-
+const audioPlayer = new Audio();
 // --- 新增：語音功能相關狀態 ---
 const isVoiceListening = ref(false);
 const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -77,8 +77,8 @@ const speak = async (text, isResult = false) => {
     const result = await getVoice({ text: clearText });
     
     if (result.data && result.data.audioContent) {
-      const audio = new Audio("data:audio/mp3;base64," + result.data.audioContent);
-      audio.play();
+      audioPlayer.src = "data:audio/mp3;base64," + result.data.audioContent;
+      audioPlayer.play();
     }
   } catch (error) {
     console.error("雲端語音失敗:", error);
@@ -95,7 +95,8 @@ const startVoiceSearch = async () => {
     alert("您的瀏覽器不支援語音功能");
     return;
   }
-
+    audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA="; // 極短無聲檔
+  audioPlayer.play().catch(e => console.log("預先解鎖中..."));
   // 手動關閉功能：如果正在執行，點擊就停止
   if (isVoiceListening.value) {
     if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
