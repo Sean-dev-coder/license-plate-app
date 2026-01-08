@@ -2,12 +2,27 @@
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { auth, db, storage, functions } from '../firebase.js';
 import imageCompression from 'browser-image-compression';// 這是用來壓縮圖片的套件
-
+import { useVoiceAssistant } from '../composables/useVoiceAssistant';
+const { 
+  isVoiceListening, 
+  message: voiceMessage, 
+  toggleVoiceSearch, 
+  speak 
+} = useVoiceAssistant();
+// 定義一個「橋樑函式」：當語音助理聽到車牌時，要執行的動作
+const onVoiceDetected = (plateString) => {
+  console.log("語音傳來車牌:", plateString);
+  searchPlate.value = plateString; // 填入搜尋框
+  handleSearch(true);              // 執行原本的搜尋 (true 代表來自語音)
+};
+// 用來綁定在按鈕上的新函式
+const handleVoiceBtnClick = () => {
+  toggleVoiceSearch(onVoiceDetected);
+};
 // --- 新增：住戶名單功能相關的狀態變數 ---
 const residentListImageUrl = ref('') // 預設是空的，我們會從 Firebase 讀取
 const residentListFile = ref(null)
 const isResidentListUploading = ref(false)
-const isListening = ref(false);
 const props = defineProps({
   collection: { type: String, required: true }
 })
@@ -34,411 +49,7 @@ const itemBeforeEdit = ref(null)
 const isNewHouseholdModalOpen = ref(false)
 const householdToCreate = ref({ id: '', name: '', features: '' })
 const pendingCount = ref(0); // 待查的數量
-// --- 新增：語音功能相關狀態 ---
-const isVoiceListening = ref(false);
-const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
-const isSystemSpeaking = ref(false); // [新功能] 防止系統報讀時自己聽自己
-const audioPlayer = new Audio();
-// --- 核心：語音辨識 (STT) ---
-// --- 新增：自定義問候語清單 ---
-const greetings = [
-  "大哥辛苦了，請說車牌",
-  "吃飽了嗎，系統準備好了",
-  "現在可以開始查詢車牌"
-];
-// --- 1. 強制原生語音版 speak 函式 (捨棄雲端，確保藍牙切換最穩) ---
-const speak = async (text, isResult = false) => {
-  if (!text || text.trim() === "") return;
 
-  isSystemSpeaking.value = true; // 標記系統正在說話，防止麥克風收到回音
-
-  // 【關鍵步驟 1】: 報讀前，強制停止麥克風
-  // 讓 Pixel 8a 的藍牙從「通話模式」切換回「媒體模式」，聲音才會清楚
-  if (recognition && isVoiceListening.value) {
-    try {
-      recognition.stop();
-      console.log("🔊 準備報讀，暫時釋放麥克風...");
-    } catch (e) {
-      console.error("停止麥克風失敗", e);
-    }
-  }
-
-  // 定義重啟麥克風的邏輯 (共用)
-  const resumeListening = () => {
-    // 延遲 0.5 秒，給藍牙耳機一點時間切換回「通話收音模式」
-    setTimeout(() => {
-      isSystemSpeaking.value = false;
-      // 只有在原本就是開啟監聽的狀態下，才自動重啟
-      if (isVoiceListening.value) {
-        console.log("👂 報讀完畢，重啟監聽...");
-        try {
-          recognition.start();
-        } catch (e) {
-          console.log("麥克風已啟動或無需重啟");
-        }
-      }
-    }, 500); 
-  };
-
-  // 【關鍵步驟 2】: 統一使用原生 SpeechSynthesis (離線/低延遲)
-  return new Promise((resolve) => {
-    // 如果是報讀車牌結果，我們稍微處理一下文字，讓它念得慢一點或清楚一點
-    // 例如把 "ABC-1234" 變成 "A B C 1 2 3 4" (可選，看您喜好)
-    let textToSpeak = text;
-    if (isResult) {
-        // 簡單優化：將英數字加空格，讓 Google 小姐念得更清楚
-        textToSpeak = text.replace(/([a-zA-Z0-9])/g, '$1 ').replace(/-/g, ' ');
-    }
-
-    const utter = new SpeechSynthesisUtterance(textToSpeak);
-    utter.lang = 'zh-TW'; 
-    utter.rate = 0.9;  // 稍微調慢一點點 (0.8~1.0)，讓保全聽得更清楚
-    utter.volume = 1;  // 最大音量
-
-    // 監聽結束事件
-    utter.onend = () => {
-      resumeListening(); // 講完了 -> 重啟麥克風
-      resolve();
-    };
-
-    utter.onerror = (err) => {
-      console.error("語音播放錯誤", err);
-      resumeListening(); // 就算出錯也要把麥克風還給使用者
-      resolve();
-    };
-
-    // 播放前先取消之前的排程，避免卡住
-    window.speechSynthesis.cancel();
-    window.speechSynthesis.speak(utter);
-  });
-};
-// ==========================================
-// 1. 全域變數與設定 (放在 startVoiceSearch 外面)
-// ==========================================
-
-// --- 語音校正字典 (包含數字、字母、常見指令諧音) ---
-const typoMap = {
-  // 指令
-  '茶尋': '查詢', '茶行': '查詢', '查尋': '查詢', '搜尋': '查詢', '查': '查詢', '尋找': '查詢',
-  
-  // 數字 (含軍用/台式諧音)
-  '一': '1', '妖': '1', '么': '1', '要': '1', '依': '1',
-  '二': '2', '愛': '2', '餓': '2', '兩': '2',
-  '三': '3', '山': '3', '散': '3',
-  '四': '4', '是': '4', '世': '4',
-  '五': '5', '舞': '5', '無': '5',
-  '六': '6', '溜': '6', '路': '6',
-  '七': '7', '去': '7', '起': '7', '氣': '7',
-  '八': '8', '巴': '8', '發': '8', '爸': '8',
-  '九': '9', '酒': '9', '久': '9',
-  '洞': '0', '動': '0', '孔': '0', '懂': '0', '零': '0',
-
-  // 字母
-  'A': 'A', 'ㄟ': 'A',
-  'B': 'B', '逼': 'B',
-  'C': 'C', '西': 'C',
-  'D': 'D', '豬': 'D',
-  'E': 'E',
-  'F': 'F', '艾夫': 'F',
-  'G': 'G', '居': 'G', '雞': 'G',
-  'H': 'H', '欸取': 'H',
-  'I': 'I', '愛': 'I', 
-  'J': 'J', '傑': 'J',
-  'K': 'K', 'KAY': 'K',
-  'L': 'L', '艾爾': 'L',
-  'M': 'M', '艾姆': 'M',
-  'N': 'N', '恩': 'N',
-  'O': 'O', '歐': 'O',
-  'P': 'P', '披': 'P',
-  'Q': 'Q', 'CUTE': 'Q',
-  'R': 'R', '阿': 'R',
-  'S': 'S', '艾斯': 'S',
-  'T': 'T', '踢': 'T',
-  'U': 'U', '優': 'U',
-  'V': 'V', 'VEE': 'V',
-  'W': 'W', '大波憂': 'W',
-  'X': 'X', '叉': 'X',
-  'Y': 'Y', '歪': 'Y',
-  'Z': 'Z', '力': 'Z',
-  '還有': ' ', 
-  '以及': ' ', 
-  '再來': ' ', 
-  '下一台': ' ', 
-  '接著': ' ', 
-  '和': ' ', 
-  '跟': ' ',
-  '空白': ' ',
-  'SPACE': ' ',
-  '個': ' ', 
-  '、': ' ', 
-  '，': ' '
-};
-// --- 校正輔助函式 (修正版：允許空白) ---
-const correctTranscript = (text) => {
-  let corrected = text;
-  // 跑迴圈替換所有諧音字
-  Object.keys(typoMap).forEach(key => {
-    const regex = new RegExp(key, 'g');
-    corrected = corrected.replace(regex, typoMap[key]);
-  });
-  
-  // 【修正重點】
-  // 原本是 /[^\w\u4e00-\u9fa5]/g -> 會把空格刪掉
-  // 改成是 /[^\w\s\u4e00-\u9fa5]/g -> 多加了 \s (代表保留空白)
-  // 這樣 "1234 5678" 才不會黏在一起變成 "12345678"
-  return corrected.toUpperCase().replace(/[^\w\s\u4e00-\u9fa5]/g, '');
-};
-
-// --- 核心狀態變數 ---
-let voiceBuffer = "";      // 用來黏接斷斷續續的語句
-let bufferTimer = null;    // 防抖計時器
-
-// A. 車牌整形 (1668ARY -> 1668-ARY)
-const formatLicensePlate = (input) => {
-  let clean = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
-  if (/^\d+$/.test(clean)) return clean; // 純數字不動
-  if (/^\d+[A-Z]+$/.test(clean)) return clean.replace(/^(\d+)([A-Z]+)$/, '$1-$2'); // 數字在前
-  if (/^[A-Z]+\d+$/.test(clean)) return clean.replace(/^([A-Z]+)(\d+)$/, '$1-$2'); // 英文在前
-  return clean;
-};
-// B. 批次提取 (輸入: "1668ARY還有9527" -> 輸出: ["1668-ARY", "9527"])
-const extractBatchPlates = (text) => {
-  let content = text.split('查詢').pop() || "";
-  // 依照非英數字切開 (空格、逗號都會被切開)
-  let tokens = content.split(/[^A-Z0-9]/).filter(t => t.length > 0);
-  
-  let results = [];
-  tokens.forEach(token => {
-    if (token.length >= 2) { // 過濾雜訊
-      results.push(formatLicensePlate(token));
-    }
-  });
-  return results;
-};
-// --- [新增功能 1] 螢幕恆亮控制 ---
-let wakeLock = null;
-
-// 請求螢幕保持喚醒的函式
-const requestWakeLock = async () => {
-  try {
-    // 檢查瀏覽器是否支援
-    if ('wakeLock' in navigator) {
-      wakeLock = await navigator.wakeLock.request('screen');
-      console.log('💡 螢幕喚醒鎖定已啟用 (螢幕將保持常亮)');
-      
-      // 如果鎖定意外斷開 (例如切換 App)，做個紀錄
-      wakeLock.addEventListener('release', () => {
-        console.log('螢幕喚醒鎖定已釋放');
-      });
-    }
-  } catch (err) {
-    console.error(`螢幕鎖定失敗: ${err.name}, ${err.message}`);
-  }
-};
-// ---【修正 3】終極版：畫面切換重連機制 ---
-// --- 【修正】核彈級畫面重連機制 ---
-const handleVisibilityChange = async () => {
-  if (document.visibilityState === 'visible') {
-    console.log("👀 回到畫面，執行核彈級重置...");
-
-    // 1. 介面強制歸零：先不要騙使用者還在聽
-    isListening.value = false;
-    
-    // 2. 螢幕鎖定
-    await requestWakeLock();
-
-    // 3. 只有在「原本就是開著」的狀態下才重連
-    if (isVoiceListening.value) {
-        message.value = "系統喚醒中..."; // 給個提示
-        
-        try {
-            // 先強制殺掉舊的，避免狀態不一致
-            if (recognition) recognition.abort(); 
-            
-            // 延遲 500ms (給手機喘口氣)，再重新啟動
-            setTimeout(() => {
-                if (recognition && isVoiceListening.value) {
-                    console.log("🚀 執行重啟指令");
-                    recognition.start().catch((err) => {
-                        // 這是最壞的情況：瀏覽器完全不給自動開
-                        console.warn("自動重啟被攔截:", err);
-                        
-                        // 誠實告訴使用者：斷線了
-                        isVoiceListening.value = false; 
-                        isListening.value = false;
-                        message.value = "⚠️ 連線中斷";
-                        // 可以考慮這裡不要 alert，不然切換畫面一直跳窗很煩
-                        // 讓使用者自己看燈號決定要不要按
-                    });
-                }
-            }, 500);
-
-        } catch (e) {
-            console.log("重連過程異常:", e);
-            isListening.value = false;
-        }
-    }
-  }
-};
-// ==========================================
-// 2. 修正後的 startVoiceSearch
-// ==========================================
-// --- 核心：語音辨識啟動函式 (包含多車牌處理邏輯) ---
-const startVoiceSearch = async () => { 
-  if (!Recognition) return alert("您的瀏覽器不支援語音功能");
-
-  // 1. 音訊預熱 (解決 iOS/Android 首次說話延遲)
-  audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA=";
-  audioPlayer.play().catch(() => {}); 
-  window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
-
-  // 2. 請求螢幕恆亮
-  try { if ('wakeLock' in navigator) navigator.wakeLock.request('screen'); } catch (e) { console.log('恆亮失敗', e); }
-  
-  // --- 如果已經在聽，就關閉 (Toggle Off) ---
-  if (isVoiceListening.value) {
-    isVoiceListening.value = false;
-    isSystemSpeaking.value = false;
-    
-    if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
-    if (recognition) recognition.stop();
-    
-    // 關閉時計時器要清掉
-    if (bufferTimer) clearTimeout(bufferTimer);
-    voiceBuffer = "";
-    
-    message.value = "語音監聽已關閉";
-    return; 
-  }
-
-  // --- 啟動語音監聽 (Toggle On) ---
-  const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
-  isVoiceListening.value = true; 
-  message.value = `系統啟動：${welcomeMessage}`;
-  await speak(welcomeMessage); 
-
-  // 初始化 Recognition 物件
-  if (!recognition) {
-    recognition = new Recognition();
-    recognition.lang = 'zh-TW';
-    recognition.continuous = true; 
-    recognition.interimResults = true;
-
-    recognition.onstart = () => { 
-        message.value = "🎤 監聽中..."; 
-        isListening.value = true; // 確保這裡有同步狀態
-    };
-
-    // --- 【新增】錯誤監聽：防止狀態卡死 ---
-    recognition.onerror = (event) => {
-        console.error("語音辨識錯誤:", event.error);
-        
-        // 如果是這類嚴重錯誤，直接關閉功能，不要讓保全以為還在跑
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-            isVoiceListening.value = false;
-            isListening.value = false;
-            alert("麥克風權限失效，請重新點擊麥克風按鈕");
-        }
-        
-        // 如果是 'aborted' (被中斷)，也要把狀態修復
-        if (event.error === 'aborted') {
-            isListening.value = false;
-        }
-    };
-    // --- 這裡就是您覺得困惑的 onresult區塊，我們已經改好了 ---
-    recognition.onresult = (event) => {
-      // 系統正在報號時，暫停接收，避免自己聽自己
-      if (isSystemSpeaking.value) return;
-
-      let currentSegment = "";
-      let isFinal = false; 
-
-      // 抓取目前的辨識結果
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) isFinal = true;
-        currentSegment += event.results[i][0].transcript;
-      }
-
-      // 只有當這句話結束 (停頓) 時才處理
-      if (isFinal) {
-        // A. 進行文字校正 (把「洞洞七」變成「007」)
-        const correctedSegment = correctTranscript(currentSegment);
-        
-        // B. 加入全域緩衝區
-        voiceBuffer += correctedSegment;
-        message.value = `聽取中: ${voiceBuffer}`; // 顯示在畫面上給你看
-
-        // 檢查是否有「查詢」指令
-        if (voiceBuffer.includes('查詢')) {
-            
-            // 1. 提取所有聽到的車牌 (回傳陣列)
-            const platesFound = extractBatchPlates(voiceBuffer);
-
-            // 2. 如果有抓到車牌
-            if (platesFound.length > 0) {
-                
-                // 【核心邏輯】模擬手動輸入：用空格把所有車牌接起來
-                // 例如 ["1668-ARY", "2900"] -> "1668-ARY 2900"
-                const simulationInput = platesFound.join(' ');
-                
-                // 計算總長度 (用來判斷是否快速通關，去除空格和橫槓)
-                const totalLength = simulationInput.replace(/[-\s]/g, '').length;
-
-                // --- 狀況一：快速通關 (字數夠多，直接查) ---
-                // 例如兩台車加起來通常超過 6 碼
-                if (totalLength >= 6) {
-                    console.log("🚀 多車牌語音輸入(快速):", simulationInput);
-                    if (bufferTimer) clearTimeout(bufferTimer);
-                    
-                    searchPlate.value = simulationInput; // 填入
-                    handleSearch(true); // 執行
-                    
-                    voiceBuffer = ""; // 清空
-                    return; 
-                }
-
-                // --- 狀況二：緩衝倒數 (字數少，等 1.2 秒) ---
-                if (bufferTimer) clearTimeout(bufferTimer);
-                
-                bufferTimer = setTimeout(() => {
-                    console.log(`語音緩衝結束，送出:`, simulationInput);
-                    
-                    searchPlate.value = simulationInput;
-                    handleSearch(true);
-                    
-                    voiceBuffer = ""; 
-                }, 1200); // 等待 1.2 秒
-            }
-        }
-      }
-    };
-    // -------------------------------------------------------
-
-// --- 【修正】onend：更聰明的重啟邏輯 ---
-    recognition.onend = () => {
-      console.log("麥克風已停止 (onend triggered)");
-      isListening.value = false; // 1. 介面狀態馬上歸零
-      
-      // 2. 只有在「畫面是亮著的」+「非系統說話」+「總開關是開的」才自動重啟
-      // 關鍵修改：加上 document.visibilityState === 'visible'
-      // 這樣背景執行時就會乖乖停止，不會跟系統打架
-      if (document.visibilityState === 'visible' && isVoiceListening.value && !isSystemSpeaking.value) { 
-          console.log("🔄 保持監聽，自動重啟...");
-          try {
-              recognition.start(); 
-          } catch(e) {
-              console.log("重啟過快或已在執行");
-          }
-      }
-    };
-  }
-  
-  // 初次啟動
-  try {
-      if(isVoiceListening.value && !isSystemSpeaking.value) recognition.start();
-  } catch(e) {}
-};
 // --- 工具：圖片壓縮函式 ---
 const compressImage = async (imageFile) => {
   // 設定壓縮選項
@@ -545,17 +156,11 @@ const handlePendingClick = async () => {
 };
 
 onMounted(() => {
-  loadResidentListImage(); // 頁面載入時，自動讀取圖片
-  requestWakeLock(); // 一進來就先鎖住螢幕
-  document.addEventListener('visibilitychange', handleVisibilityChange);
+  loadResidentListImage();
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
-// 好的習慣：離開頁面時移除監聽
 onUnmounted(() => {
-    document.removeEventListener('visibilitychange', handleVisibilityChange);
-    if (wakeLock !== null) {
-        wakeLock.release();
-    }
+
 });
 // --- 修改：處理住戶名單圖片上傳的相關函式 ---
 const handleResidentListFileSelect = (event) => {
@@ -1089,7 +694,7 @@ const handleImageUpload = async () => {
 
   <div class="controls-row">
     <button 
-      @click="startVoiceSearch" 
+      @click="handleVoiceBtnClick" 
       :class="{ 'voice-active': isVoiceListening }"
       class="voice-btn-round"
     >
@@ -1218,8 +823,8 @@ const handleImageUpload = async () => {
         <div class="actions"><button @click="handleCreate" :disabled="isLoading" class="save-button">確認新增</button></div>
       </div>
 
-      <div v-if="message" class="message-section" :class="{ success: isSuccess }">
-        <p>{{ message }}</p>
+      <div v-if="message || voiceMessage" class="message-section" :class="{ success: isSuccess }">
+        <p>{{ message ? message : voiceMessage }}</p>
       </div>
 
       <div v-if="isNewHouseholdModalOpen" class="modal-overlay" @click.self="isNewHouseholdModalOpen = false">
