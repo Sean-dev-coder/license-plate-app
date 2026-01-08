@@ -47,22 +47,60 @@ const greetings = [
   "吃飽了嗎，系統準備好了",
   "現在可以開始查詢車牌"
 ];
-// --- 1. 優化後的 speak 函式 (支援防干擾閘門) ---
+
+// --- 1. 優化後的 speak 函式 (解決藍牙音訊衝突核心) ---
 const speak = async (text, isResult = false) => {
   if (!text || text.trim() === "") return;
 
-  isSystemSpeaking.value = true; // [關鍵] 告訴系統：現在正在報讀，請暫停聽取
+  isSystemSpeaking.value = true; // 標記系統正在說話
+
+  // 【新增】: 報讀前，先強制停止麥克風收音
+  // 這會讓 Android 右上角綠色圖示消失，釋放藍牙頻寬給 TTS 語音
+  if (recognition && isVoiceListening.value) {
+    try {
+      recognition.stop();
+      console.log("🔊 準備報讀，暫時釋放麥克風...");
+    } catch (e) {
+      console.error("停止麥克風失敗", e);
+    }
+  }
+
+  // 定義一個重啟麥克風的共用函式
+  const resumeListening = () => {
+    // 稍微延遲以避免錄到系統尾音
+    setTimeout(() => {
+      isSystemSpeaking.value = false;
+      // 只有在「原本就是語音監聽模式」的情況下才重啟
+      if (isVoiceListening.value) {
+        console.log("👂 報讀完畢，重啟監聽...");
+        try {
+          recognition.start();
+        } catch (e) {
+          // 防止頻繁重啟報錯
+          console.log("麥克風已啟動或無需重啟");
+        }
+      }
+    }, 800); // 延遲 0.8 秒讓耳機有時間切換模式
+  };
 
   // 模式 A：一般問候 (原生 TTS)
   if (!isResult) {
     return new Promise((resolve) => {
       const utter = new SpeechSynthesisUtterance(text);
       utter.lang = 'zh-TW';
+      utter.rate = 1.0; // 確保語速正常
+      
       utter.onend = () => {
-        // 稍微延遲 0.5 秒再恢復監聽，避開回音
-        setTimeout(() => { isSystemSpeaking.value = false; }, 500);
+        resumeListening(); // 播報結束，恢復麥克風
         resolve();
       };
+      
+      utter.onerror = () => {
+        resumeListening(); // 即使出錯也要恢復
+        resolve();
+      };
+
+      window.speechSynthesis.cancel(); // 先清空佇列
       window.speechSynthesis.speak(utter);
     });
   }
@@ -70,6 +108,7 @@ const speak = async (text, isResult = false) => {
   // 模式 B：結果報讀 (Firebase 雲端語音)
   isLoading.value = true;
   try {
+    // 增加空格以利字母朗讀 (A B C)
     const clearText = text.toUpperCase().split('').map(char => {
       if (/[A-Z0-9]/.test(char)) return ` ${char} `; 
       return char;
@@ -80,88 +119,128 @@ const speak = async (text, isResult = false) => {
     
     if (result.data && result.data.audioContent) {
       audioPlayer.src = "data:audio/mp3;base64," + result.data.audioContent;
+      
       audioPlayer.onended = () => {
-        // [關鍵] 報讀完畢，恢復監聽
-        setTimeout(() => { isSystemSpeaking.value = false; }, 1000);
+        resumeListening(); // 【關鍵】播放完畢，恢復麥克風
       };
+      
+      audioPlayer.onerror = () => {
+        resumeListening(); // 出錯也要恢復
+      };
+
       await audioPlayer.play();
     }
   } catch (error) {
-    console.error("雲端語音失敗:", error);
+    console.error("雲端語音失敗，降級使用原生語音:", error);
+    // 降級處理
     const utter = new SpeechSynthesisUtterance(text);
-    utter.onend = () => { isSystemSpeaking.value = false; };
+    utter.onend = () => { resumeListening(); };
+    window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
   } finally {
     isLoading.value = false;
   }
 };
 
-// --- 2. 持續監聽版 startVoiceSearch (自動重啟不中斷) ---
+// --- 2. 持續監聽版 startVoiceSearch (配合 speak 邏輯修改) ---
 const startVoiceSearch = async () => { 
   if (!Recognition) return alert("您的瀏覽器不支援語音功能");
 
-  // [iOS 解鎖] 點擊瞬間執行音訊預熱，解決 iPhone 報錯
+  // [iOS/Android] 音訊預熱
   audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA=";
   audioPlayer.play().catch(() => {}); 
   window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
-  // [優化] 請求螢幕恆亮，防止手機因自動鎖屏而切斷麥克風
+  
+  // 請求螢幕恆亮
   try { if ('wakeLock' in navigator) navigator.wakeLock.request('screen'); } catch (e) { console.log('恆亮失敗', e); }
   
+  // 如果已經在監聽，則關閉
   if (isVoiceListening.value) {
     isVoiceListening.value = false;
+    isSystemSpeaking.value = false; // 重置狀態
     if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
     if (recognition) recognition.stop();
     message.value = "語音監聽已關閉";
     return; 
   }
 
+  // 啟動流程
   const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
   isVoiceListening.value = true; 
   message.value = `系統啟動：${welcomeMessage}`;
+  
+  // 先報讀歡迎語 (speak 函式內部會自動處理暫停/啟動麥克風)
   await speak(welcomeMessage); 
 
-  if (!isVoiceListening.value) return;
+  // 初始化辨識物件 (如果 speak 還沒建立它的話)
+  if (!recognition) {
+    recognition = new Recognition();
+    recognition.lang = 'zh-TW';
+    recognition.continuous = true; 
+    recognition.interimResults = true;
 
-  recognition = new Recognition();
-  recognition.lang = 'zh-TW';
-  recognition.continuous = true; // [關鍵] 開啟持續模式
-  recognition.interimResults = true;
+    recognition.onstart = () => { 
+        console.log("Microphone Started");
+        message.value = "🎤 持續監聽中..."; 
+    };
 
-  recognition.onstart = () => { message.value = "🎤 持續監聽中..."; };
+    recognition.onresult = (event) => {
+      // 雙重保險：如果系統標記正在說話，忽略輸入
+      if (isSystemSpeaking.value) return;
 
-  recognition.onresult = (event) => {
-    // [關鍵] 系統說話時，暫停接收指令
-    if (isSystemSpeaking.value) return;
+      let fullTranscript = "";
+      let isFinalResult = false; 
 
-    let fullTranscript = "";
-    let isFinalResult = false; 
-
-    for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (event.results[i].isFinal) isFinalResult = true;
-      fullTranscript += event.results[i][0].transcript;
-    }
-
-    const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
-    searchPlate.value = displayResult;
-
-    if (displayResult.includes('查詢') && isFinalResult) {
-      let finalCode = displayResult.replace(/\s+/g, '').replace(/DASH|槓|點/g, '-').replace('查詢', '');
-      if (finalCode) {
-        searchPlate.value = finalCode;
-        handleSearch(true); 
-        searchPlate.value = ''; // [關鍵] 查完清空，繼續等下一台
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        if (event.results[i].isFinal) isFinalResult = true;
+        fullTranscript += event.results[i][0].transcript;
       }
-    }
-  };
 
-  recognition.onend = () => {
-    // [關鍵] 若非手動停止，自動重啟監聽
-    if (isVoiceListening.value) { recognition.start(); }
-  };
+      const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
+      searchPlate.value = displayResult;
+
+      // 關鍵詞觸發查詢
+      if (displayResult.includes('查詢') && isFinalResult) {
+        let finalCode = displayResult.replace(/\s+/g, '').replace(/DASH|槓|點/g, '-').replace('查詢', '');
+        if (finalCode) {
+          console.log(`語音觸發查詢: ${finalCode}`);
+          searchPlate.value = finalCode;
+          
+          // 這裡傳入 true，讓 handleSearch 知道這是語音觸發的
+          // handleSearch 內部調用 speak 時，就會觸發「暫停麥克風」流程
+          handleSearch(true); 
+          
+          searchPlate.value = ''; 
+        }
+      }
+    };
+
+    recognition.onerror = (event) => {
+        console.error("語音錯誤:", event.error);
+        // 如果是 no-speech 錯誤，通常是安靜太久，嘗試自動重連
+        if (event.error === 'no-speech' && isVoiceListening.value && !isSystemSpeaking.value) {
+            recognition.stop(); // 觸發 onend 重啟
+        }
+    };
+
+    recognition.onend = () => {
+      console.log("麥克風已停止 (onend)");
+      // 【修改重點】：
+      // 只有在「使用者想要持續聽」 且 「系統不是正在報讀」 的情況下才立刻重啟。
+      // 如果 isSystemSpeaking 為 true，代表是 speak() 函式主動切斷的，
+      // 那就不要在這裡重啟，交給 speak() 的 onend 去重啟。
+      if (isVoiceListening.value && !isSystemSpeaking.value) { 
+          console.log("非系統中斷，自動重啟麥克風...");
+          recognition.start(); 
+      }
+    };
+  }
   
-  recognition.start();
+  // 如果 speak 結束後沒有自動啟動 (因為第一次)，這裡補啟動
+  try {
+      if(isVoiceListening.value && !isSystemSpeaking.value) recognition.start();
+  } catch(e) {}
 };
-
 // --- 工具：圖片壓縮函式 ---
 const compressImage = async (imageFile) => {
   // 設定壓縮選項
