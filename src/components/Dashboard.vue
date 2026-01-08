@@ -160,10 +160,21 @@ const typoMap = {
   'W': 'W', '大波憂': 'W',
   'X': 'X', '叉': 'X',
   'Y': 'Y', '歪': 'Y',
-  'Z': 'Z', '力': 'Z'
+  'Z': 'Z', '力': 'Z',
+  '還有': ' ', 
+  '以及': ' ', 
+  '再來': ' ', 
+  '下一台': ' ', 
+  '接著': ' ', 
+  '和': ' ', 
+  '跟': ' ',
+  '空白': ' ',
+  'SPACE': ' ',
+  '個': ' ', 
+  '、': ' ', 
+  '，': ' '
 };
-
-// --- 校正輔助函式 ---
+// --- 校正輔助函式 (修正版：允許空白) ---
 const correctTranscript = (text) => {
   let corrected = text;
   // 跑迴圈替換所有諧音字
@@ -171,148 +182,167 @@ const correctTranscript = (text) => {
     const regex = new RegExp(key, 'g');
     corrected = corrected.replace(regex, typoMap[key]);
   });
-  // 轉大寫，並移除標點符號 (只留英數字和中文字，方便後續處理)
-  return corrected.toUpperCase().replace(/[^\w\u4e00-\u9fa5]/g, '');
+  
+  // 【修正重點】
+  // 原本是 /[^\w\u4e00-\u9fa5]/g -> 會把空格刪掉
+  // 改成是 /[^\w\s\u4e00-\u9fa5]/g -> 多加了 \s (代表保留空白)
+  // 這樣 "1234 5678" 才不會黏在一起變成 "12345678"
+  return corrected.toUpperCase().replace(/[^\w\s\u4e00-\u9fa5]/g, '');
 };
 
 // --- 核心狀態變數 ---
 let voiceBuffer = "";      // 用來黏接斷斷續續的語句
 let bufferTimer = null;    // 防抖計時器
 
-// ==========================================
-// 1. 新增：自動補橫槓的整形函式
-// ==========================================
+// A. 車牌整形 (1668ARY -> 1668-ARY)
 const formatLicensePlate = (input) => {
-  // 先確保是乾淨的英數字大寫
   let clean = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
-
-  // 狀況 A: 純數字 (例如 "9527") -> 不動，直接回傳讓模糊搜尋處理
-  if (/^\d+$/.test(clean)) return clean;
-
-  // 狀況 B: 數字在前，英文在後 (例如 "1668ARY" -> "1668-ARY")
-  // 邏輯：抓出前面所有的數字，跟後面所有的英文，中間加槓
-  if (/^\d+[A-Z]+$/.test(clean)) {
-    return clean.replace(/^(\d+)([A-Z]+)$/, '$1-$2');
-  }
-
-  // 狀況 C: 英文在前，數字在後 (例如 "ARY1668" -> "ARY-1668")
-  if (/^[A-Z]+\d+$/.test(clean)) {
-    return clean.replace(/^([A-Z]+)(\d+)$/, '$1-$2');
-  }
-
-  // 其他狀況 (例如已經有槓，或是格式很怪)，就回傳原本處理過的字串
+  if (/^\d+$/.test(clean)) return clean; // 純數字不動
+  if (/^\d+[A-Z]+$/.test(clean)) return clean.replace(/^(\d+)([A-Z]+)$/, '$1-$2'); // 數字在前
+  if (/^[A-Z]+\d+$/.test(clean)) return clean.replace(/^([A-Z]+)(\d+)$/, '$1-$2'); // 英文在前
   return clean;
 };
-
+// B. 批次提取 (輸入: "1668ARY還有9527" -> 輸出: ["1668-ARY", "9527"])
+const extractBatchPlates = (text) => {
+  let content = text.split('查詢').pop() || "";
+  // 依照非英數字切開 (空格、逗號都會被切開)
+  let tokens = content.split(/[^A-Z0-9]/).filter(t => t.length > 0);
+  
+  let results = [];
+  tokens.forEach(token => {
+    if (token.length >= 2) { // 過濾雜訊
+      results.push(formatLicensePlate(token));
+    }
+  });
+  return results;
+};
 // ==========================================
 // 2. 修正後的 startVoiceSearch
 // ==========================================
+// --- 核心：語音辨識啟動函式 (包含多車牌處理邏輯) ---
 const startVoiceSearch = async () => { 
   if (!Recognition) return alert("您的瀏覽器不支援語音功能");
 
+  // 1. 音訊預熱 (解決 iOS/Android 首次說話延遲)
   audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA=";
   audioPlayer.play().catch(() => {}); 
   window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
 
-  try { if ('wakeLock' in navigator) navigator.wakeLock.request('screen'); } catch (e) {}
+  // 2. 請求螢幕恆亮
+  try { if ('wakeLock' in navigator) navigator.wakeLock.request('screen'); } catch (e) { console.log('恆亮失敗', e); }
   
-  // --- 關閉 ---
+  // --- 如果已經在聽，就關閉 (Toggle Off) ---
   if (isVoiceListening.value) {
     isVoiceListening.value = false;
     isSystemSpeaking.value = false;
+    
     if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
     if (recognition) recognition.stop();
+    
+    // 關閉時計時器要清掉
     if (bufferTimer) clearTimeout(bufferTimer);
     voiceBuffer = "";
+    
     message.value = "語音監聽已關閉";
     return; 
   }
 
-  // --- 啟動 ---
+  // --- 啟動語音監聽 (Toggle On) ---
   const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
   isVoiceListening.value = true; 
   message.value = `系統啟動：${welcomeMessage}`;
   await speak(welcomeMessage); 
 
+  // 初始化 Recognition 物件
   if (!recognition) {
     recognition = new Recognition();
     recognition.lang = 'zh-TW';
     recognition.continuous = true; 
     recognition.interimResults = true;
 
+    recognition.onstart = () => { 
+        message.value = "🎤 監聽中..."; 
+    };
+
+    // --- 這裡就是您覺得困惑的 onresult區塊，我們已經改好了 ---
     recognition.onresult = (event) => {
+      // 系統正在報號時，暫停接收，避免自己聽自己
       if (isSystemSpeaking.value) return;
 
       let currentSegment = "";
       let isFinal = false; 
 
+      // 抓取目前的辨識結果
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) isFinal = true;
         currentSegment += event.results[i][0].transcript;
       }
 
+      // 只有當這句話結束 (停頓) 時才處理
       if (isFinal) {
-        // A. 校正 (洞洞七 -> 007)
+        // A. 進行文字校正 (把「洞洞七」變成「007」)
         const correctedSegment = correctTranscript(currentSegment);
+        
+        // B. 加入全域緩衝區
         voiceBuffer += correctedSegment;
-        message.value = `聽取中: ${voiceBuffer}`; 
+        message.value = `聽取中: ${voiceBuffer}`; // 顯示在畫面上給你看
 
-        // 檢查是否有關鍵字
+        // 檢查是否有「查詢」指令
         if (voiceBuffer.includes('查詢')) {
-            // 取出原始字串 (這時候可能是 "1668ARY")
-            let rawCode = voiceBuffer.split('查詢').pop();
             
-            // B. 【核心修改】自動整形 (轉成 "1668-ARY")
-            let formattedCode = formatLicensePlate(rawCode);
+            // 1. 提取所有聽到的車牌 (回傳陣列)
+            const platesFound = extractBatchPlates(voiceBuffer);
 
-            // C. 快速通關邏輯
-            // 如果整形後的長度夠長 (例如 "1668-ARY" 是 8 碼，去除槓是 7 碼)
-            // 這裡判斷去除槓後的長度是否 >= 6
-            let cleanLength = formattedCode.replace(/-/g, '').length;
+            // 2. 如果有抓到車牌
+            if (platesFound.length > 0) {
+                
+                // 【核心邏輯】模擬手動輸入：用空格把所有車牌接起來
+                // 例如 ["1668-ARY", "2900"] -> "1668-ARY 2900"
+                const simulationInput = platesFound.join(' ');
+                
+                // 計算總長度 (用來判斷是否快速通關，去除空格和橫槓)
+                const totalLength = simulationInput.replace(/[-\s]/g, '').length;
 
-            if (cleanLength >= 6) {
-                console.log(`🚀 快速通關: ${formattedCode}`);
+                // --- 狀況一：快速通關 (字數夠多，直接查) ---
+                // 例如兩台車加起來通常超過 6 碼
+                if (totalLength >= 6) {
+                    console.log("🚀 多車牌語音輸入(快速):", simulationInput);
+                    if (bufferTimer) clearTimeout(bufferTimer);
+                    
+                    searchPlate.value = simulationInput; // 填入
+                    handleSearch(true); // 執行
+                    
+                    voiceBuffer = ""; // 清空
+                    return; 
+                }
+
+                // --- 狀況二：緩衝倒數 (字數少，等 1.2 秒) ---
                 if (bufferTimer) clearTimeout(bufferTimer);
                 
-                searchPlate.value = formattedCode; // 填入有槓的車牌
-                handleSearch(true);
-                
-                voiceBuffer = "";
-                return; 
+                bufferTimer = setTimeout(() => {
+                    console.log(`語音緩衝結束，送出:`, simulationInput);
+                    
+                    searchPlate.value = simulationInput;
+                    handleSearch(true);
+                    
+                    voiceBuffer = ""; 
+                }, 1200); // 等待 1.2 秒
             }
         }
-
-        // D. 緩衝倒數邏輯
-        if (bufferTimer) clearTimeout(bufferTimer);
-        bufferTimer = setTimeout(() => {
-          if (voiceBuffer.includes('查詢')) {
-            let rawCode = voiceBuffer.split('查詢').pop();
-            
-            // 【核心修改】這裡也要整形
-            let formattedCode = formatLicensePlate(rawCode);
-            let cleanLength = formattedCode.replace(/-/g, '').length;
-            
-            // 只要有內容 (>=2碼) 就查，支援純數字模糊搜尋
-            if (cleanLength >= 2) { 
-              console.log(`緩衝搜尋: ${formattedCode}`);
-              searchPlate.value = formattedCode;
-              handleSearch(true);
-            } else {
-              speak("請再說一次");
-            }
-          }
-          voiceBuffer = ""; 
-        }, 1200);
       }
     };
+    // -------------------------------------------------------
 
     recognition.onend = () => {
+      // 斷線重連機制 (排除系統報號時的主動中斷)
       if (isVoiceListening.value && !isSystemSpeaking.value) { 
+          console.log("重新啟動麥克風...");
           recognition.start(); 
       }
     };
   }
   
+  // 初次啟動
   try {
       if(isVoiceListening.value && !isSystemSpeaking.value) recognition.start();
   } catch(e) {}
@@ -606,7 +636,7 @@ const handleSearch = async (isVoice = false) => {
         isNewHouseholdModalOpen.value = true
       }
     } else {
-      if (finalSearchId.includes('-')) {
+      if (finalSearchId.includes('-') && !finalSearchId.includes(' ')) {
         const docRef = db.collection(props.collection).doc(finalSearchId)
         const docSnap = await docRef.get()
         if (docSnap.exists) {
