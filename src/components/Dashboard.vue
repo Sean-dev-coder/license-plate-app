@@ -113,101 +113,206 @@ const speak = async (text, isResult = false) => {
     window.speechSynthesis.speak(utter);
   });
 };
-// --- 2. 持續監聽版 startVoiceSearch (配合 speak 邏輯修改) ---
+// ==========================================
+// 1. 全域變數與設定 (放在 startVoiceSearch 外面)
+// ==========================================
+
+// --- 語音校正字典 (包含數字、字母、常見指令諧音) ---
+const typoMap = {
+  // 指令
+  '茶尋': '查詢', '茶行': '查詢', '查尋': '查詢', '搜尋': '查詢', '查': '查詢', '尋找': '查詢',
+  
+  // 數字 (含軍用/台式諧音)
+  '一': '1', '妖': '1', '么': '1', '要': '1', '依': '1',
+  '二': '2', '愛': '2', '餓': '2', '兩': '2',
+  '三': '3', '山': '3', '散': '3',
+  '四': '4', '是': '4', '世': '4',
+  '五': '5', '舞': '5', '無': '5',
+  '六': '6', '溜': '6', '路': '6',
+  '七': '7', '去': '7', '起': '7', '氣': '7',
+  '八': '8', '巴': '8', '發': '8', '爸': '8',
+  '九': '9', '酒': '9', '久': '9',
+  '洞': '0', '動': '0', '孔': '0', '懂': '0', '零': '0',
+
+  // 字母
+  'A': 'A', 'ㄟ': 'A',
+  'B': 'B', '逼': 'B',
+  'C': 'C', '西': 'C',
+  'D': 'D', '豬': 'D',
+  'E': 'E',
+  'F': 'F', '艾夫': 'F',
+  'G': 'G', '居': 'G', '雞': 'G',
+  'H': 'H', '欸取': 'H',
+  'I': 'I', '愛': 'I', 
+  'J': 'J', '傑': 'J',
+  'K': 'K', 'KAY': 'K',
+  'L': 'L', '艾爾': 'L',
+  'M': 'M', '艾姆': 'M',
+  'N': 'N', '恩': 'N',
+  'O': 'O', '歐': 'O',
+  'P': 'P', '披': 'P',
+  'Q': 'Q', 'CUTE': 'Q',
+  'R': 'R', '阿': 'R',
+  'S': 'S', '艾斯': 'S',
+  'T': 'T', '踢': 'T',
+  'U': 'U', '優': 'U',
+  'V': 'V', 'VEE': 'V',
+  'W': 'W', '大波憂': 'W',
+  'X': 'X', '叉': 'X',
+  'Y': 'Y', '歪': 'Y',
+  'Z': 'Z', '力': 'Z'
+};
+
+// --- 校正輔助函式 ---
+const correctTranscript = (text) => {
+  let corrected = text;
+  // 跑迴圈替換所有諧音字
+  Object.keys(typoMap).forEach(key => {
+    const regex = new RegExp(key, 'g');
+    corrected = corrected.replace(regex, typoMap[key]);
+  });
+  // 轉大寫，並移除標點符號 (只留英數字和中文字，方便後續處理)
+  return corrected.toUpperCase().replace(/[^\w\u4e00-\u9fa5]/g, '');
+};
+
+// --- 核心狀態變數 ---
+let voiceBuffer = "";      // 用來黏接斷斷續續的語句
+let bufferTimer = null;    // 防抖計時器
+
+// ==========================================
+// 1. 新增：自動補橫槓的整形函式
+// ==========================================
+const formatLicensePlate = (input) => {
+  // 先確保是乾淨的英數字大寫
+  let clean = input.toUpperCase().replace(/[^A-Z0-9]/g, '');
+
+  // 狀況 A: 純數字 (例如 "9527") -> 不動，直接回傳讓模糊搜尋處理
+  if (/^\d+$/.test(clean)) return clean;
+
+  // 狀況 B: 數字在前，英文在後 (例如 "1668ARY" -> "1668-ARY")
+  // 邏輯：抓出前面所有的數字，跟後面所有的英文，中間加槓
+  if (/^\d+[A-Z]+$/.test(clean)) {
+    return clean.replace(/^(\d+)([A-Z]+)$/, '$1-$2');
+  }
+
+  // 狀況 C: 英文在前，數字在後 (例如 "ARY1668" -> "ARY-1668")
+  if (/^[A-Z]+\d+$/.test(clean)) {
+    return clean.replace(/^([A-Z]+)(\d+)$/, '$1-$2');
+  }
+
+  // 其他狀況 (例如已經有槓，或是格式很怪)，就回傳原本處理過的字串
+  return clean;
+};
+
+// ==========================================
+// 2. 修正後的 startVoiceSearch
+// ==========================================
 const startVoiceSearch = async () => { 
   if (!Recognition) return alert("您的瀏覽器不支援語音功能");
 
-  // [iOS/Android] 音訊預熱
   audioPlayer.src = "data:audio/wav;base64,UklGRiQAAABXQVZFRm10IBAAAAABAAEAgD8AAIA/AAABAAgAZGF0YQAAAAA=";
   audioPlayer.play().catch(() => {}); 
   window.speechSynthesis.speak(new SpeechSynthesisUtterance(''));
+
+  try { if ('wakeLock' in navigator) navigator.wakeLock.request('screen'); } catch (e) {}
   
-  // 請求螢幕恆亮
-  try { if ('wakeLock' in navigator) navigator.wakeLock.request('screen'); } catch (e) { console.log('恆亮失敗', e); }
-  
-  // 如果已經在監聽，則關閉
+  // --- 關閉 ---
   if (isVoiceListening.value) {
     isVoiceListening.value = false;
-    isSystemSpeaking.value = false; // 重置狀態
+    isSystemSpeaking.value = false;
     if (window.speechSynthesis.speaking) window.speechSynthesis.cancel();
     if (recognition) recognition.stop();
+    if (bufferTimer) clearTimeout(bufferTimer);
+    voiceBuffer = "";
     message.value = "語音監聽已關閉";
     return; 
   }
 
-  // 啟動流程
+  // --- 啟動 ---
   const welcomeMessage = greetings[Math.floor(Math.random() * greetings.length)];
   isVoiceListening.value = true; 
   message.value = `系統啟動：${welcomeMessage}`;
-  
-  // 先報讀歡迎語 (speak 函式內部會自動處理暫停/啟動麥克風)
   await speak(welcomeMessage); 
 
-  // 初始化辨識物件 (如果 speak 還沒建立它的話)
   if (!recognition) {
     recognition = new Recognition();
     recognition.lang = 'zh-TW';
     recognition.continuous = true; 
     recognition.interimResults = true;
 
-    recognition.onstart = () => { 
-        console.log("Microphone Started");
-        message.value = "🎤 持續監聽中..."; 
-    };
-
     recognition.onresult = (event) => {
-      // 雙重保險：如果系統標記正在說話，忽略輸入
       if (isSystemSpeaking.value) return;
 
-      let fullTranscript = "";
-      let isFinalResult = false; 
+      let currentSegment = "";
+      let isFinal = false; 
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        if (event.results[i].isFinal) isFinalResult = true;
-        fullTranscript += event.results[i][0].transcript;
+        if (event.results[i].isFinal) isFinal = true;
+        currentSegment += event.results[i][0].transcript;
       }
 
-      const displayResult = fullTranscript.toUpperCase().replace(/[。，！？\.?]/g, '').trim();
-      searchPlate.value = displayResult;
+      if (isFinal) {
+        // A. 校正 (洞洞七 -> 007)
+        const correctedSegment = correctTranscript(currentSegment);
+        voiceBuffer += correctedSegment;
+        message.value = `聽取中: ${voiceBuffer}`; 
 
-      // 關鍵詞觸發查詢
-      if (displayResult.includes('查詢') && isFinalResult) {
-        let finalCode = displayResult.replace(/\s+/g, '').replace(/DASH|槓|點/g, '-').replace('查詢', '');
-        if (finalCode) {
-          console.log(`語音觸發查詢: ${finalCode}`);
-          searchPlate.value = finalCode;
-          
-          // 這裡傳入 true，讓 handleSearch 知道這是語音觸發的
-          // handleSearch 內部調用 speak 時，就會觸發「暫停麥克風」流程
-          handleSearch(true); 
-          
-          searchPlate.value = ''; 
+        // 檢查是否有關鍵字
+        if (voiceBuffer.includes('查詢')) {
+            // 取出原始字串 (這時候可能是 "1668ARY")
+            let rawCode = voiceBuffer.split('查詢').pop();
+            
+            // B. 【核心修改】自動整形 (轉成 "1668-ARY")
+            let formattedCode = formatLicensePlate(rawCode);
+
+            // C. 快速通關邏輯
+            // 如果整形後的長度夠長 (例如 "1668-ARY" 是 8 碼，去除槓是 7 碼)
+            // 這裡判斷去除槓後的長度是否 >= 6
+            let cleanLength = formattedCode.replace(/-/g, '').length;
+
+            if (cleanLength >= 6) {
+                console.log(`🚀 快速通關: ${formattedCode}`);
+                if (bufferTimer) clearTimeout(bufferTimer);
+                
+                searchPlate.value = formattedCode; // 填入有槓的車牌
+                handleSearch(true);
+                
+                voiceBuffer = "";
+                return; 
+            }
         }
+
+        // D. 緩衝倒數邏輯
+        if (bufferTimer) clearTimeout(bufferTimer);
+        bufferTimer = setTimeout(() => {
+          if (voiceBuffer.includes('查詢')) {
+            let rawCode = voiceBuffer.split('查詢').pop();
+            
+            // 【核心修改】這裡也要整形
+            let formattedCode = formatLicensePlate(rawCode);
+            let cleanLength = formattedCode.replace(/-/g, '').length;
+            
+            // 只要有內容 (>=2碼) 就查，支援純數字模糊搜尋
+            if (cleanLength >= 2) { 
+              console.log(`緩衝搜尋: ${formattedCode}`);
+              searchPlate.value = formattedCode;
+              handleSearch(true);
+            } else {
+              speak("請再說一次");
+            }
+          }
+          voiceBuffer = ""; 
+        }, 1200);
       }
-    };
-
-    recognition.onerror = (event) => {
-        console.error("語音錯誤:", event.error);
-        // 如果是 no-speech 錯誤，通常是安靜太久，嘗試自動重連
-        if (event.error === 'no-speech' && isVoiceListening.value && !isSystemSpeaking.value) {
-            recognition.stop(); // 觸發 onend 重啟
-        }
     };
 
     recognition.onend = () => {
-      console.log("麥克風已停止 (onend)");
-      // 【修改重點】：
-      // 只有在「使用者想要持續聽」 且 「系統不是正在報讀」 的情況下才立刻重啟。
-      // 如果 isSystemSpeaking 為 true，代表是 speak() 函式主動切斷的，
-      // 那就不要在這裡重啟，交給 speak() 的 onend 去重啟。
       if (isVoiceListening.value && !isSystemSpeaking.value) { 
-          console.log("非系統中斷，自動重啟麥克風...");
           recognition.start(); 
       }
     };
   }
   
-  // 如果 speak 結束後沒有自動啟動 (因為第一次)，這裡補啟動
   try {
       if(isVoiceListening.value && !isSystemSpeaking.value) recognition.start();
   } catch(e) {}
