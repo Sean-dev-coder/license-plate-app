@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, nextTick, watch, computed } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { auth, db, storage, functions } from '../firebase.js';
 import imageCompression from 'browser-image-compression';// 這是用來壓縮圖片的套件
 
@@ -7,7 +7,7 @@ import imageCompression from 'browser-image-compression';// 這是用來壓縮�
 const residentListImageUrl = ref('') // 預設是空的，我們會從 Firebase 讀取
 const residentListFile = ref(null)
 const isResidentListUploading = ref(false)
-
+const isListening = ref(false);
 const props = defineProps({
   collection: { type: String, required: true }
 })
@@ -216,6 +216,71 @@ const extractBatchPlates = (text) => {
   });
   return results;
 };
+// --- [新增功能 1] 螢幕恆亮控制 ---
+let wakeLock = null;
+
+// 請求螢幕保持喚醒的函式
+const requestWakeLock = async () => {
+  try {
+    // 檢查瀏覽器是否支援
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      console.log('💡 螢幕喚醒鎖定已啟用 (螢幕將保持常亮)');
+      
+      // 如果鎖定意外斷開 (例如切換 App)，做個紀錄
+      wakeLock.addEventListener('release', () => {
+        console.log('螢幕喚醒鎖定已釋放');
+      });
+    }
+  } catch (err) {
+    console.error(`螢幕鎖定失敗: ${err.name}, ${err.message}`);
+  }
+};
+// ---【修正 3】終極版：畫面切換重連機制 ---
+// --- 【修正】核彈級畫面重連機制 ---
+const handleVisibilityChange = async () => {
+  if (document.visibilityState === 'visible') {
+    console.log("👀 回到畫面，執行核彈級重置...");
+
+    // 1. 介面強制歸零：先不要騙使用者還在聽
+    isListening.value = false;
+    
+    // 2. 螢幕鎖定
+    await requestWakeLock();
+
+    // 3. 只有在「原本就是開著」的狀態下才重連
+    if (isVoiceListening.value) {
+        message.value = "系統喚醒中..."; // 給個提示
+        
+        try {
+            // 先強制殺掉舊的，避免狀態不一致
+            if (recognition) recognition.abort(); 
+            
+            // 延遲 500ms (給手機喘口氣)，再重新啟動
+            setTimeout(() => {
+                if (recognition && isVoiceListening.value) {
+                    console.log("🚀 執行重啟指令");
+                    recognition.start().catch((err) => {
+                        // 這是最壞的情況：瀏覽器完全不給自動開
+                        console.warn("自動重啟被攔截:", err);
+                        
+                        // 誠實告訴使用者：斷線了
+                        isVoiceListening.value = false; 
+                        isListening.value = false;
+                        message.value = "⚠️ 連線中斷";
+                        // 可以考慮這裡不要 alert，不然切換畫面一直跳窗很煩
+                        // 讓使用者自己看燈號決定要不要按
+                    });
+                }
+            }, 500);
+
+        } catch (e) {
+            console.log("重連過程異常:", e);
+            isListening.value = false;
+        }
+    }
+  }
+};
 // ==========================================
 // 2. 修正後的 startVoiceSearch
 // ==========================================
@@ -262,8 +327,25 @@ const startVoiceSearch = async () => {
 
     recognition.onstart = () => { 
         message.value = "🎤 監聽中..."; 
+        isListening.value = true; // 確保這裡有同步狀態
     };
 
+    // --- 【新增】錯誤監聽：防止狀態卡死 ---
+    recognition.onerror = (event) => {
+        console.error("語音辨識錯誤:", event.error);
+        
+        // 如果是這類嚴重錯誤，直接關閉功能，不要讓保全以為還在跑
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+            isVoiceListening.value = false;
+            isListening.value = false;
+            alert("麥克風權限失效，請重新點擊麥克風按鈕");
+        }
+        
+        // 如果是 'aborted' (被中斷)，也要把狀態修復
+        if (event.error === 'aborted') {
+            isListening.value = false;
+        }
+    };
     // --- 這裡就是您覺得困惑的 onresult區塊，我們已經改好了 ---
     recognition.onresult = (event) => {
       // 系統正在報號時，暫停接收，避免自己聽自己
@@ -333,11 +415,21 @@ const startVoiceSearch = async () => {
     };
     // -------------------------------------------------------
 
+// --- 【修正】onend：更聰明的重啟邏輯 ---
     recognition.onend = () => {
-      // 斷線重連機制 (排除系統報號時的主動中斷)
-      if (isVoiceListening.value && !isSystemSpeaking.value) { 
-          console.log("重新啟動麥克風...");
-          recognition.start(); 
+      console.log("麥克風已停止 (onend triggered)");
+      isListening.value = false; // 1. 介面狀態馬上歸零
+      
+      // 2. 只有在「畫面是亮著的」+「非系統說話」+「總開關是開的」才自動重啟
+      // 關鍵修改：加上 document.visibilityState === 'visible'
+      // 這樣背景執行時就會乖乖停止，不會跟系統打架
+      if (document.visibilityState === 'visible' && isVoiceListening.value && !isSystemSpeaking.value) { 
+          console.log("🔄 保持監聽，自動重啟...");
+          try {
+              recognition.start(); 
+          } catch(e) {
+              console.log("重啟過快或已在執行");
+          }
       }
     };
   }
@@ -454,9 +546,17 @@ const handlePendingClick = async () => {
 
 onMounted(() => {
   loadResidentListImage(); // 頁面載入時，自動讀取圖片
+  requestWakeLock(); // 一進來就先鎖住螢幕
+  document.addEventListener('visibilitychange', handleVisibilityChange);
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 })
-
+// 好的習慣：離開頁面時移除監聽
+onUnmounted(() => {
+    document.removeEventListener('visibilitychange', handleVisibilityChange);
+    if (wakeLock !== null) {
+        wakeLock.release();
+    }
+});
 // --- 修改：處理住戶名單圖片上傳的相關函式 ---
 const handleResidentListFileSelect = (event) => {
   residentListFile.value = event.target.files[0];
