@@ -47,15 +47,14 @@ const greetings = [
   "吃飽了嗎，系統準備好了",
   "現在可以開始查詢車牌"
 ];
-
-// --- 1. 優化後的 speak 函式 (解決藍牙音訊衝突核心) ---
+// --- 1. 強制原生語音版 speak 函式 (捨棄雲端，確保藍牙切換最穩) ---
 const speak = async (text, isResult = false) => {
   if (!text || text.trim() === "") return;
 
-  isSystemSpeaking.value = true; // 標記系統正在說話
+  isSystemSpeaking.value = true; // 標記系統正在說話，防止麥克風收到回音
 
-  // 【新增】: 報讀前，先強制停止麥克風收音
-  // 這會讓 Android 右上角綠色圖示消失，釋放藍牙頻寬給 TTS 語音
+  // 【關鍵步驟 1】: 報讀前，強制停止麥克風
+  // 讓 Pixel 8a 的藍牙從「通話模式」切換回「媒體模式」，聲音才會清楚
   if (recognition && isVoiceListening.value) {
     try {
       recognition.stop();
@@ -65,83 +64,55 @@ const speak = async (text, isResult = false) => {
     }
   }
 
-  // 定義一個重啟麥克風的共用函式
+  // 定義重啟麥克風的邏輯 (共用)
   const resumeListening = () => {
-    // 稍微延遲以避免錄到系統尾音
+    // 延遲 0.5 秒，給藍牙耳機一點時間切換回「通話收音模式」
     setTimeout(() => {
       isSystemSpeaking.value = false;
-      // 只有在「原本就是語音監聽模式」的情況下才重啟
+      // 只有在原本就是開啟監聽的狀態下，才自動重啟
       if (isVoiceListening.value) {
         console.log("👂 報讀完畢，重啟監聽...");
         try {
           recognition.start();
         } catch (e) {
-          // 防止頻繁重啟報錯
           console.log("麥克風已啟動或無需重啟");
         }
       }
-    }, 800); // 延遲 0.8 秒讓耳機有時間切換模式
+    }, 500); 
   };
 
-  // 模式 A：一般問候 (原生 TTS)
-  if (!isResult) {
-    return new Promise((resolve) => {
-      const utter = new SpeechSynthesisUtterance(text);
-      utter.lang = 'zh-TW';
-      utter.rate = 1.0; // 確保語速正常
-      
-      utter.onend = () => {
-        resumeListening(); // 播報結束，恢復麥克風
-        resolve();
-      };
-      
-      utter.onerror = () => {
-        resumeListening(); // 即使出錯也要恢復
-        resolve();
-      };
-
-      window.speechSynthesis.cancel(); // 先清空佇列
-      window.speechSynthesis.speak(utter);
-    });
-  }
-
-  // 模式 B：結果報讀 (Firebase 雲端語音)
-  isLoading.value = true;
-  try {
-    // 增加空格以利字母朗讀 (A B C)
-    const clearText = text.toUpperCase().split('').map(char => {
-      if (/[A-Z0-9]/.test(char)) return ` ${char} `; 
-      return char;
-    }).join('');
-
-    const getVoice = functions.httpsCallable('getHighQualityVoice'); 
-    const result = await getVoice({ text: clearText });
-    
-    if (result.data && result.data.audioContent) {
-      audioPlayer.src = "data:audio/mp3;base64," + result.data.audioContent;
-      
-      audioPlayer.onended = () => {
-        resumeListening(); // 【關鍵】播放完畢，恢復麥克風
-      };
-      
-      audioPlayer.onerror = () => {
-        resumeListening(); // 出錯也要恢復
-      };
-
-      await audioPlayer.play();
+  // 【關鍵步驟 2】: 統一使用原生 SpeechSynthesis (離線/低延遲)
+  return new Promise((resolve) => {
+    // 如果是報讀車牌結果，我們稍微處理一下文字，讓它念得慢一點或清楚一點
+    // 例如把 "ABC-1234" 變成 "A B C 1 2 3 4" (可選，看您喜好)
+    let textToSpeak = text;
+    if (isResult) {
+        // 簡單優化：將英數字加空格，讓 Google 小姐念得更清楚
+        textToSpeak = text.replace(/([a-zA-Z0-9])/g, '$1 ').replace(/-/g, ' ');
     }
-  } catch (error) {
-    console.error("雲端語音失敗，降級使用原生語音:", error);
-    // 降級處理
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.onend = () => { resumeListening(); };
+
+    const utter = new SpeechSynthesisUtterance(textToSpeak);
+    utter.lang = 'zh-TW'; 
+    utter.rate = 0.9;  // 稍微調慢一點點 (0.8~1.0)，讓保全聽得更清楚
+    utter.volume = 1;  // 最大音量
+
+    // 監聽結束事件
+    utter.onend = () => {
+      resumeListening(); // 講完了 -> 重啟麥克風
+      resolve();
+    };
+
+    utter.onerror = (err) => {
+      console.error("語音播放錯誤", err);
+      resumeListening(); // 就算出錯也要把麥克風還給使用者
+      resolve();
+    };
+
+    // 播放前先取消之前的排程，避免卡住
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(utter);
-  } finally {
-    isLoading.value = false;
-  }
+  });
 };
-
 // --- 2. 持續監聽版 startVoiceSearch (配合 speak 邏輯修改) ---
 const startVoiceSearch = async () => { 
   if (!Recognition) return alert("您的瀏覽器不支援語音功能");
