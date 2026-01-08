@@ -3,17 +3,18 @@ import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import { auth, db, storage, functions } from '../firebase.js';
 import imageCompression from 'browser-image-compression';// 這是用來壓縮圖片的套件
 import { useVoiceAssistant } from '../composables/useVoiceAssistant';
+import { usePlateManagement } from '../composables/usePlateManagement';
+// --- [第一部分] 語音助理 ---
 const { 
   isVoiceListening, 
   message: voiceMessage, 
   toggleVoiceSearch, 
   speak 
 } = useVoiceAssistant();
-// 定義一個「橋樑函式」：當語音助理聽到車牌時，要執行的動作
+// --- [第三部分] 橋樑函式 (語音聽到 -> 搜尋) ---
 const onVoiceDetected = (plateString) => {
-  console.log("語音傳來車牌:", plateString);
-  searchPlate.value = plateString; // 填入搜尋框
-  handleSearch(true);              // 執行原本的搜尋 (true 代表來自語音)
+  searchPlate.value = plateString;
+  handleSearch(true); // 觸發 Composable 裡的搜尋
 };
 // 用來綁定在按鈕上的新函式
 const handleVoiceBtnClick = () => {
@@ -26,29 +27,27 @@ const isResidentListUploading = ref(false)
 const props = defineProps({
   collection: { type: String, required: true }
 })
-
+// --- [第二部分] 核心資料管理 (取代原本幾百行程式碼) ---
+const collectionRef = computed(() => props.collection);
+const {
+  // 狀態
+  searchPlate, isLoading, message, isSuccess, searchResults, selectedItem,
+  searchMode, isNumericMode, showCreateForm, plateToCreate, isEditing,
+  isNewHouseholdModalOpen, householdToCreate, pendingCount,
+  itemBeforeEdit, // 記得要解構這個出來，因為 template 有用到
+  
+  // 方法
+  handleSearch, selectItem, changeSearchMode, handlePendingClick,
+  enterEditMode, cancelEdit, saveAllChanges, handleCreate,
+  handleHouseholdCreate, handleDelete, syncExistingParkingData
+} = usePlateManagement(collectionRef, speak);
 // --- 狀態變數 ---
-const searchPlate = ref('')
-const isLoading = ref(false)
-const message = ref('')
-const isSuccess = ref(false)
 const searchInput = ref(null)
-const searchResults = ref([])
-const selectedItem = ref(null)
-const showCreateForm = ref(false)
-const plateToCreate = ref('')
 const selectedFile = ref(null)
 const isUploading = ref(false)
-const isNumericMode = ref(true)
-const searchMode = ref('plate')
 const editSectionRef = ref(null)
 const notesTextarea = ref(null)
 const featuresTextarea = ref(null)
-const isEditing = ref(false)
-const itemBeforeEdit = ref(null)
-const isNewHouseholdModalOpen = ref(false)
-const householdToCreate = ref({ id: '', name: '', features: '' })
-const pendingCount = ref(0); // 待查的數量
 
 // --- 工具：圖片壓縮函式 ---
 const compressImage = async (imageFile) => {
@@ -70,18 +69,6 @@ const compressImage = async (imageFile) => {
     return imageFile; // 如果壓縮失敗，就回傳原圖，避免流程卡死
   }
 }
-// 【關鍵整合：資料選集邏輯】
-const householdCollectionName = computed(() => {
-  // 自動偵測車牌集合的後綴，並對應到戶號集合
-  const suffix = props.collection.replace('licensePlates', '');
-  return `households${suffix}`;
-});
-
-// 新增：動態對應社區的車位反查表名稱 (例如 parking_lookup_test)
-const lookupCollectionName = computed(() => {
-  const suffix = props.collection.replace('licensePlates', '');
-  return `parking_lookup${suffix}`;
-});
 // --- 修改：載入住戶名單圖片的函式 ---
 const loadResidentListImage = async () => {
   try {
@@ -100,61 +87,6 @@ const loadResidentListImage = async () => {
     console.error("讀取住戶名單圖片失敗:", error);
   }
 }
-
-// 1. 檢查有多少筆「待查」資料 (用來顯示按鈕上的數字)
-const checkPendingCount = async () => {
-  if (!props.collection) return;
-  try {
-    const snapshot = await db.collection(props.collection)
-      .where('householdCode', '==', '-')
-      .get();
-    pendingCount.value = snapshot.size; // 根據真實資料更新數字
-  } catch (e) {
-    console.error("檢查待查數量失敗", e);
-  }
-};
-// 只要你切換社區，這裡就會觸發，自動去算新社區的數量
-watch(() => props.collection, async (newVal) => {
-  if (newVal) {
-    // 當社區改變時，如果您希望搜尋模式重置回「查車牌」，可以加這行：
-    // changeSearchMode('plate'); 
-    
-    // 重新檢查該社區的待查數量
-    await checkPendingCount();
-  }
-}, { immediate: true }); // immediate: true 代表畫面剛載入時也會跑一次
-
-// 2. 點擊「待查」按鈕後的動作
-const handlePendingClick = async () => {
-  changeSearchMode('pending'); // 切換模式
-  isLoading.value = true;
-  searchResults.value = [];
-  message.value = '正在載入待查清單...';
-
-  try {
-    const snapshot = await db.collection(props.collection)
-      .where('householdCode', '==', '-')
-      .get();
-
-    if (!snapshot.empty) {
-      searchResults.value = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      message.value = `查詢完成，共有 ${searchResults.value.length} 筆待查資料。`;
-    } else {
-      message.value = '目前沒有待查資料。';
-      // 如果點了發現沒資料，順便更新一下計數
-      pendingCount.value = 0;
-    }
-  } catch (error) {
-    console.error("載入待查清單失敗:", error);
-    message.value = '載入失敗';
-  } finally {
-    isLoading.value = false;
-  }
-};
-
 onMounted(() => {
   loadResidentListImage();
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
@@ -218,14 +150,12 @@ const handleResidentListClick = () => {
     alert('圖片網址未設定！');
   }
 }
-
 const quickSearch = (term, mode = 'plate') => {
   if (!term) return
-  searchPlate.value = term
-  searchMode.value = mode
-  handleSearch()
+  searchPlate.value = term;
+  changeSearchMode(mode); // 呼叫 Composable 的方法
+  handleSearch();
 }
-
 const adjustTextareaHeight = () => {
   nextTick(() => {
     const textarea = notesTextarea.value;
@@ -247,402 +177,12 @@ watch(selectedItem, (newItem) => {
     adjustTextareaHeight()
   }
 })
-
-const enterEditMode = () => {
-  itemBeforeEdit.value = JSON.parse(JSON.stringify(selectedItem.value))
-  isEditing.value = true
-  nextTick(() => {
-    adjustTextareaHeight()
-  })
-}
-
-const cancelEdit = () => {
-  selectedItem.value = { ...itemBeforeEdit.value }
-  isEditing.value = false
-}
-
-const handleHouseholdCreate = async () => {
-  if (!householdToCreate.value.id) { alert('户号不能为空！'); return }
-  isLoading.value = true
-  try {
-    const docRef = db.collection(householdCollectionName.value).doc(householdToCreate.value.id)
-    const dataToCreate = {
-      name: householdToCreate.value.name || '',
-      features: householdToCreate.value.features || ''
-    }
-    await docRef.set(dataToCreate)
-    message.value = `户号「${householdToCreate.value.id}」的住户资讯已成功建立！`
-    isSuccess.value = true
-    isNewHouseholdModalOpen.value = false
-  } catch (error) {
-    console.error("建立住户失败:", error)
-    message.value = '建立住户失败'
-    isSuccess.value = false
-  } finally {
-    isLoading.value = false
-  }
-}
-
-const changeSearchMode = (mode) => {
-  searchMode.value = mode
-  message.value = ''; // 切換分頁時清除訊息
-  if (mode === 'household' || mode === 'parking') { isNumericMode.value = false } 
-  else { isNumericMode.value = true }
-  if (mode !== 'residentList') {
-    nextTick(() => { if (searchInput.value) searchInput.value.focus() })
-  }
-}
-
 const toggleInputMode = () => {
   nextTick(() => { if (searchInput.value) searchInput.value.focus() })
 }
-
-const handleSearch = async (isVoice = false) => {
-  // 確保 isVoice 是布林值 (防止 Event 物件干擾)
-  const fromVoice = isVoice === true; 
-
-  if (!searchPlate.value) { alert('請輸入查詢內容！'); return }
-  const searchInputString = searchPlate.value.toUpperCase().trim()
-  searchPlate.value = ''
-  isLoading.value = true
-  searchResults.value = []
-  selectedItem.value = null
-  message.value = ''
-  showCreateForm.value = false
-
-  try {
-    let finalSearchId = searchInputString;
-    let targetMode = searchMode.value;
-
-    if (searchMode.value === 'parking') {
-      const lookupDoc = await db.collection(lookupCollectionName.value).doc(searchInputString).get();
-      if (lookupDoc.exists) {
-        finalSearchId = lookupDoc.data().ownerId;
-        searchMode.value = 'household';
-        targetMode = 'household';
-        const msg = `車位搜尋成功，正在導向戶號：${finalSearchId}`;
-        message.value = msg;
-        if (fromVoice) speak(msg); // 只有語音模式才報讀
-      } else {
-        const errorMsg = `查無車位「${searchInputString}」`;
-        message.value = errorMsg;
-        if (fromVoice) speak(errorMsg); // 只有語音模式才報讀
-        isLoading.value = false; 
-        return;
-      }
-    }
-
-    let querySnapshot;
-    if (targetMode === 'household') {
-      querySnapshot = await db.collection(props.collection).where('householdCode', '==', finalSearchId).get()
-      if (querySnapshot.empty) {
-        if (fromVoice) speak(`查無戶號 ${finalSearchId}`);
-        householdToCreate.value = { id: finalSearchId, name: '', features: '' }
-        isNewHouseholdModalOpen.value = true
-      }
-    } else {
-      if (finalSearchId.includes('-') && !finalSearchId.includes(' ')) {
-        const docRef = db.collection(props.collection).doc(finalSearchId)
-        const docSnap = await docRef.get()
-        if (docSnap.exists) {
-          const result = { id: docSnap.id, ...docSnap.data() }; 
-          searchResults.value = [result]; 
-          selectItem(result, fromVoice); // <--- 將語音旗標傳下去
-        } else {
-          const msg = `查無車牌 ${finalSearchId}`;
-          message.value = msg; 
-          if (fromVoice) speak(msg); // 只有語音模式才報讀
-          showCreateForm.value = true; 
-          plateToCreate.value = finalSearchId; 
-          selectedItem.value = { householdCode: '', notes: '' }
-        }
-        isLoading.value = false; 
-        return;
-      } else {
-        const searchTerms = finalSearchId.split(' ').filter(term => term.length > 0)
-        querySnapshot = await db.collection(props.collection).where('searchKeywords', 'array-contains-any', searchTerms).get()
-      }
-    }
-
-    if (querySnapshot && !querySnapshot.empty) {
-      searchResults.value = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-      if (searchResults.value.length === 1) {
-        selectItem(searchResults.value[0], fromVoice); // <--- 將語音旗標傳下去
-      } else {
-        if (fromVoice) speak(`找到 ${searchResults.value.length} 筆資料`);
-      }
-    } else if (!showCreateForm.value && !searchResults.value.length && !isNewHouseholdModalOpen.value) {
-        if (fromVoice) {
-         // [優化] 結合輸入的字串唸出，且 speak 函式會自動處理字母拆讀 (例如 A B C)
-         speak(`查無 ${searchInputString} 的車牌`);
-        }
-    }
-  } catch (error) {
-    if (fromVoice) speak("系統查詢出錯");
-  } finally {
-    isLoading.value = false
-  }
-}
-
-const selectItem = async (item, isVoice = false) => {
-  const fromVoice = isVoice === true; // 確保布林值
-  if (!item) return;
-  
-  message.value = '正在載入詳細資料...';
-  isLoading.value = true;
-  
-  let completeItemData = { ...item };
-
-  if (item.householdCode) {
-    try {
-      const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode);
-      const householdDocSnap = await householdDocRef.get();
-      if (householdDocSnap.exists) {
-        completeItemData.householdInfo = householdDocSnap.data();
-      }
-    } catch (error) { console.error(error); }
-  }
-
-  selectedItem.value = completeItemData;
-  isEditing.value = false;
-  message.value = '';
-  isLoading.value = false;
-
-  // --- 關鍵判斷：只有語音模式才報讀 ---
-  if (fromVoice) {
-    const plateId = item.id || '未知車牌';
-    const unitCode = completeItemData.householdCode || '尚未登記戶號';
-    const userName = completeItemData.householdInfo?.name ? `，住戶 ${completeItemData.householdInfo.name}` : '';
-    const finalSpeechText = `查詢成功。車牌 ${plateId}。屬於 ${unitCode} ${userName}`;
-
-    speak(finalSpeechText, true); // 只有這裡會觸發高品質報讀
-  }
-
-  nextTick(() => {
-    if (editSectionRef.value) {
-      editSectionRef.value.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  });
-};
-
-const saveAllChanges = async () => {
-  if (!selectedItem.value || !selectedItem.value.id) return
-  isLoading.value = true
-  
-  const plateDocRef = db.collection(props.collection).doc(selectedItem.value.id)
-  const householdDocRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode)
-
-  const plateData = {
-    householdCode: selectedItem.value.householdCode,
-    notes: selectedItem.value.notes,
-    lastUpdatedBy: auth.currentUser.email,
-    updatedAt: new Date()
-  }
-  
-  const householdData = {
-    name: selectedItem.value.householdInfo.name || '',
-    features: selectedItem.value.householdInfo.features || '',
-    parking_number: selectedItem.value.householdInfo.parking_number || ''
-  }
-
-try {
-    const batch = db.batch();
-    const plateDocRef = db.collection(props.collection).doc(selectedItem.value.id);
-    const householdDocRef = db.collection(householdCollectionName.value).doc(selectedItem.value.householdCode);
-
-    // 1. 取得舊有的車位清單 (從編輯前的備份 itemBeforeEdit 取得)
-    const oldParkingStr = itemBeforeEdit.value.householdInfo?.parking_number || '';
-    const oldParkingArray = oldParkingStr.split('/').map(s => s.trim()).filter(Boolean);
-
-    // 2. 取得新輸入的車位清單
-    const newParkingStr = selectedItem.value.householdInfo.parking_number || '';
-    const newParkingArray = newParkingStr.split('/').map(s => s.trim()).filter(Boolean);
-
-    // 3. 找出「哪些車位被刪掉了」(在舊清單有，但新清單沒有)
-    const spotsToDelete = oldParkingArray.filter(spot => !newParkingArray.includes(spot));
-
-    // 4. 更新主表資料
-    const plateData = {
-      householdCode: selectedItem.value.householdCode,
-      notes: selectedItem.value.notes,
-      lastUpdatedBy: auth.currentUser.email,
-      updatedAt: new Date()
-    };
-    
-    const householdData = {
-      name: selectedItem.value.householdInfo.name || '',
-      features: selectedItem.value.householdInfo.features || '',
-      parking_number: newParkingStr,
-      parking: newParkingArray // 同步更新 Array 欄位
-    };
-
-    batch.update(plateDocRef, plateData);
-    batch.set(householdDocRef, householdData, { merge: true });
-
-    // 5. 【核心修正】刪除不再使用的舊車位索引
-    const targetLookup = lookupCollectionName.value;
-    spotsToDelete.forEach(spot => {
-      const lookupRef = db.collection(targetLookup).doc(spot.toUpperCase());
-      batch.delete(lookupRef);
-      console.log(`🗑️ 移除舊索引: ${spot}`);
-    });
-
-    // 6. 新增或更新現在的車位索引
-    newParkingArray.forEach(spot => {
-      const lookupRef = db.collection(targetLookup).doc(spot.toUpperCase());
-      batch.set(lookupRef, { 
-        ownerId: selectedItem.value.householdCode,
-        updatedAt: new Date()
-      }, { merge: true });
-      console.log(`✨ 更新索引: ${spot}`);
-    });
-
-    await batch.commit();
-    
-    message.value = '所有資料與車位反查索引已同步完成！';
-    isSuccess.value = true;
-    
-    // 更新搜尋結果清單中的顯示
-    const index = searchResults.value.findIndex(item => item.id === selectedItem.value.id);
-    if (index !== -1) { 
-      searchResults.value[index] = { ...selectedItem.value };
-    }
-    
-    isEditing.value = false;
-    isLoading.value = false;
-    
-  } catch (error) {
-    console.error("儲存失敗:", error);
-    message.value = '儲存失敗，請稍後再試。';
-    isSuccess.value = false;
-    isLoading.value = false;
-  } finally {
-    await checkPendingCount(); 
-  }
-}
-
-const syncExistingParkingData = async () => {
-  const targetLookup = lookupCollectionName.value;
-  if (!window.confirm(`這將會掃描所有舊資料並建立「${targetLookup}」索引，確定執行嗎？`)) return;
-  
-  isLoading.value = true;
-  message.value = `正在同步 ${targetLookup} 舊車位資料...`;
-
-  try {
-    const batch = db.batch();
-    // 1. 抓取目前選定社區的所有戶號資料
-    const snapshot = await db.collection(householdCollectionName.value).get();
-    
-    let count = 0;
-    snapshot.forEach(doc => {
-      const data = doc.data();
-      const householdId = doc.id;
-      // 拆解該戶原本存好的車位號碼字串
-      const parkingArray = data.parking_number 
-        ? data.parking_number.split('/').map(s => s.trim()).filter(Boolean) 
-        : [];
-
-      parkingArray.forEach(spot => {
-        // 使用動態 Suffix 集合名稱
-        const lookupRef = db.collection(targetLookup).doc(spot.toUpperCase());
-        batch.set(lookupRef, { 
-          ownerId: householdId,
-          updatedAt: new Date(),
-          note: "由系統維護腳本自動補齊"
-        }, { merge: true });
-        count++;
-      });
-    });
-
-    await batch.commit();
-    message.value = `同步完成！已成功為 ${targetLookup} 建立 ${count} 個車位索引。`;
-    isSuccess.value = true;
-  } catch (error) {
-    console.error("同步失敗:", error);
-    message.value = "同步失敗，請檢查權限或網路。";
-    isSuccess.value = false;
-  } finally {
-    isLoading.value = false;
-  }
-};
-const handleCreate = async () => {
-   if (!plateToCreate.value) return
-  isLoading.value = true
-  try {
-    const docRef = db.collection(props.collection).doc(plateToCreate.value)
-    const keywords = plateToCreate.value.toUpperCase().split('-').filter(Boolean)
-    const dataToCreate = { 
-      // 加入 .toUpperCase() 強制轉大寫，並加上 || '' 防止出錯
-      householdCode: (selectedItem.value.householdCode || '').toUpperCase(), 
-      notes: selectedItem.value.notes, 
-      createdBy: auth.currentUser.email, 
-      createdAt: new Date(), 
-      searchKeywords: keywords, 
-      imageUrl: '' 
-    }
-    await docRef.set(dataToCreate)
-    message.value = `車牌「${plateToCreate.value}」已成功新增！`; isSuccess.value = true
-    showCreateForm.value = false; selectedItem.value = null; searchPlate.value = plateToCreate.value
-  } catch (error) { console.error("新增失敗:", error); message.value = '新增失敗'; isSuccess.value = false }
-  finally { 
-    isLoading.value = false 
-    await checkPendingCount(); 
-   }
-}
-
-const handleDelete = async () => {
-  if (!selectedItem.value || !selectedItem.value.id) return
-  if (!window.confirm(`確定要永久刪除車牌「${selectedItem.value.id}」的資料嗎？`)) { return }
-  isLoading.value = true
-  
-  try {
-    const batch = db.batch(); // 使用 Batch 確保清理與刪除同步完成
-    
-    // 1. 取得目前該社區的車位反查表名稱
-    const targetLookup = lookupCollectionName.value;
-
-    // 2. 取得要刪除的車位列表 (從目前選中的資料中拆解)
-    const parkingStr = selectedItem.value.householdInfo?.parking_number || '';
-    const parkingArray = parkingStr.split('/').map(s => s.trim()).filter(Boolean);
-
-    // 3. 將清理反查表的動作加入批次
-    parkingArray.forEach(spot => {
-      console.log(spot);
-      const lookupRef = db.collection(targetLookup).doc(spot.toUpperCase());
-      batch.delete(lookupRef);
-    });
-
-    // 4. 加入刪除車牌主檔的動作
-    const plateRef = db.collection(props.collection).doc(selectedItem.value.id);
-    batch.delete(plateRef);
-
-    // 5. 處理圖片刪除 (圖片刪除不支援 Batch，維持原本做法)
-    if (selectedItem.value.imageUrl) {
-      const imageRef = storage.refFromURL(selectedItem.value.imageUrl);
-      await imageRef.delete();
-    }
-
-    // 6. 提交所有刪除動作
-    await batch.commit();
-
-    message.value = `車牌 ${selectedItem.value.id} 及其車位索引已成功清理。`;
-    isSuccess.value = true
-    searchResults.value = searchResults.value.filter(item => item.id !== selectedItem.value.id)
-    selectedItem.value = null
-  } catch (error) {
-    console.error("刪除失敗:", error);
-    message.value = '刪除失敗，請確認資料狀態';
-    isSuccess.value = false
-  }  finally { 
-    isLoading.value = false 
-    await checkPendingCount(); 
-  }
-}
-
 const handleFileSelect = (event) => {
   selectedFile.value = event.target.files[0]
 }
-
 const handleImageUpload = async () => {
   if (!selectedFile.value) { alert('請先選擇圖片檔案！'); return }
   if (!selectedItem.value || !selectedItem.value.id) { alert('請先選擇資料項目'); return }
