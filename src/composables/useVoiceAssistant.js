@@ -91,7 +91,7 @@ export function useVoiceAssistant() {
           const totalLength = simulationInput.replace(/[-\s]/g, '').length;
           
           // 快速通關邏輯
-          if (totalLength >= 4) {
+          if (totalLength >= 6) {
              triggerSearch(simulationInput, true);
              return;
           }
