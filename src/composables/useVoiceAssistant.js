@@ -89,9 +89,9 @@ export function useVoiceAssistant() {
         if (platesFound.length > 0) {
           const simulationInput = platesFound.join(' ');
           const totalLength = simulationInput.replace(/[-\s]/g, '').length;
-
+          
           // 快速通關邏輯
-          if (totalLength >= 6) {
+          if (totalLength >= 4) {
              triggerSearch(simulationInput, true);
              return;
           }
