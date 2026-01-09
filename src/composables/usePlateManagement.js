@@ -94,7 +94,10 @@ export function usePlateManagement(collectionRef, speak) {
     message.value = '正在載入詳細資料...';
     isLoading.value = true;
     
-    let completeItemData = { ...item };
+    let completeItemData = { 
+      ...item,
+      householdInfo: { name: '', features: '', parking_number: '' } // 給予預設空值
+    };
 
     // 撈取住戶資訊
     if (item.householdCode) {
@@ -102,7 +105,11 @@ export function usePlateManagement(collectionRef, speak) {
         const householdDocRef = db.collection(householdCollectionName.value).doc(item.householdCode);
         const householdDocSnap = await householdDocRef.get();
         if (householdDocSnap.exists) {
-          completeItemData.householdInfo = householdDocSnap.data();
+          // 如果資料存在，用實際資料覆蓋預設空值
+          completeItemData.householdInfo = { 
+            ...completeItemData.householdInfo, 
+            ...householdDocSnap.data() 
+          };
         }
       } catch (error) { console.error(error); }
     }
@@ -186,7 +193,11 @@ export function usePlateManagement(collectionRef, speak) {
              if (fromVoice && speak) speak(msg);
              showCreateForm.value = true;
              plateToCreate.value = finalSearchId;
-             selectedItem.value = { householdCode: '', notes: '' };
+             selectedItem.value = { 
+              householdCode: '', 
+              notes: '',
+              householdInfo: { name: '', features: '', parking_number: '' } 
+            };
            }
            isLoading.value = false;
            return;
