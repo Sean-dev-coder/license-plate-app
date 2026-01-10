@@ -15,7 +15,68 @@ export function useVoiceAssistant() {
   let wakeLock = null;
   const audioPlayer = new Audio();
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  // ==========================================
+  // 【新增】強制喚醒藍牙麥克風的函式
+  // ==========================================
+  // ==========================================
+  // 【加強版】精準鎖定藍牙裝置並喚醒
+  // ==========================================
+  const wakeUpBluetooth = async () => {
+    try {
+      message.value = "正在搜尋藍牙耳機...";
+      
+      // 1. 第一次請求：為了拿權限 (不然 enumerateDevices 標籤會是空的)
+      // 這一點點時間順便讓 Android 知道我們要用麥克風
+      let stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop()); // 用完馬上關，準備下一步
 
+      // 2. 列出所有裝置，找出那是「第幾個」
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioInputs = devices.filter(device => device.kind === 'audioinput');
+      
+      // --- 策略 A：智慧搜尋 (推薦) ---
+      // 找名字裡面有 "Bluetooth", "Headset", "JLab" (您的耳機牌子) 的
+      let targetDevice = audioInputs.find(d => 
+      // d.label.toLowerCase().includes('headset') ||
+        d.label.toLowerCase().includes('jlab') ||
+        d.label.toLowerCase().includes('bluetooth')
+      );
+      // --- 策略 B：如果您很確定它是「最後一個」(通常藍牙是最後加入的) ---
+      // 如果策略 A 沒找到，就預設抓清單裡最後一個
+      if (!targetDevice && audioInputs.length > 1) {
+        targetDevice = audioInputs[audioInputs.length - 1];
+      }
+      if (targetDevice) {
+        message.value = `鎖定裝置: ${targetDevice.label || '外接/藍牙裝置'}`;
+        console.log("鎖定目標 ID:", targetDevice.deviceId);
+
+        // 3. 【關鍵步驟】指定 deviceId 強制開啟
+        const bluetoothStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            deviceId: { exact: targetDevice.deviceId } // <--- 這裡就是在指定「第4個」
+          }
+        });
+
+        // 4. 成功連線後，等待一秒讓系統切換路由
+        // 這時候您的藍牙耳機應該會聽到背景底噪改變
+        await new Promise(resolve => setTimeout(resolve, 1000));
+
+        // 5. 任務完成，釋放它，讓 SpeechRecognition 接手
+        bluetoothStream.getTracks().forEach(track => track.stop());
+        console.log("🎤 藍牙鎖定喚醒完成");
+        
+      } else {
+        message.value = "未偵測到藍牙特徵，使用系統預設";
+        // 沒找到特定裝置，就用通用喚醒法 (雖然不完美但堪用)
+        const defaultStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        defaultStream.getTracks().forEach(track => track.stop());
+      }
+
+    } catch (err) {
+      console.error("藍牙鎖定失敗:", err);
+      message.value = "藍牙連接異常，切換回預設";
+    }
+  };
   // 自定義問候語
   const greetings = ["大哥辛苦了，請說車牌", "吃飽了嗎，系統準備好了", "現在可以開始查詢車牌"];
 
