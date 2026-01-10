@@ -263,6 +263,7 @@ export function useVoiceAssistant() {
     isListening,
     message, // 讓外層可以顯示語音狀態
     toggleVoiceSearch,
+    wakeUpBluetooth,
     speak // 匯出 speak 讓搜尋功能可以用
   };
 }
