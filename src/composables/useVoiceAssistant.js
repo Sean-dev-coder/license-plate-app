@@ -15,6 +15,37 @@ export function useVoiceAssistant() {
   let wakeLock = null;
   const audioPlayer = new Audio();
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+  // ==========================================
+  // 【測試用】檢查目前的麥克風清單
+  // ==========================================
+  const checkAudioDevices = async () => {
+    try {
+      message.value = "正在掃描麥克風裝置...";
+      
+      // 1. 必須先請求權限，否則瀏覽器只會給我們空的標籤
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // 2. 列出所有硬體裝置
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      
+      // 3. 過濾出「音訊輸入 (麥克風)」
+      const audioInputs = devices.filter(device => device.kind === 'audioinput');
+      
+      // 4. 把結果顯示在畫面上
+      // 我們把它組合成字串，這樣您在手機上才看得到
+      const deviceNames = audioInputs.map((d, i) => 
+        `${i + 1}. ${d.label || '未知名稱麥克風'}`
+      ).join(' | ');
+
+      console.log("麥克風清單:", audioInputs);
+      message.value = `抓到 ${audioInputs.length} 個麥克風: ${deviceNames}`;
+      
+    } catch (err) {
+      console.error("無法列出裝置", err);
+      message.value = "偵測失敗：" + err.message;
+    }
+  };
   // ==========================================
   // 【新增】強制喚醒藍牙麥克風的函式
   // ==========================================
@@ -264,6 +295,7 @@ export function useVoiceAssistant() {
     message, // 讓外層可以顯示語音狀態
     toggleVoiceSearch,
     wakeUpBluetooth,
+    checkAudioDevices,
     speak // 匯出 speak 讓搜尋功能可以用
   };
 }
